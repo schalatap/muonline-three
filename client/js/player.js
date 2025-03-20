@@ -604,7 +604,7 @@ function showDamageNumber(position, amount) {
   animationFrame = requestAnimationFrame(animate);
 }
 
-// Função para criar bola de fogo (modificada para melhor sistema de mira)
+// Função para criar uma bola de fogo
 function createFireball(startPosition, direction, casterId) {
   // Constantes da magia
   const FIREBALL_SPEED = 0.35; // Ligeiramente mais rápido
@@ -645,6 +645,7 @@ function createFireball(startPosition, direction, casterId) {
     maxDistance: FIREBALL_RANGE,
     casterId: casterId,
     damage: FIREBALL_DAMAGE,
+    
     update: function() {
       // Move a bola de fogo
       const moveVector = new THREE.Vector3(
@@ -711,7 +712,49 @@ function createFireball(startPosition, direction, casterId) {
       return true;
     },
     
-    // [métodos explode e remove permanecem iguais]
+    explode: function() {
+      // Efeito de explosão
+      const explosionGeometry = new THREE.SphereGeometry(1, 12, 12);
+      const explosionMaterial = new THREE.MeshBasicMaterial({
+        color: 0xff7700,
+        transparent: true,
+        opacity: 0.7
+      });
+      
+      const explosion = new THREE.Mesh(explosionGeometry, explosionMaterial);
+      explosion.position.copy(this.mesh.position);
+      scene.add(explosion);
+      
+      // Animação de explosão
+      const startTime = Date.now();
+      const duration = 500; // ms
+      
+      const animateExplosion = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Expande e desaparece
+        explosion.scale.set(1 + progress, 1 + progress, 1 + progress);
+        explosionMaterial.opacity = 0.7 * (1 - progress);
+        
+        if (progress < 1) {
+          requestAnimationFrame(animateExplosion);
+        } else {
+          scene.remove(explosion);
+        }
+      };
+      
+      requestAnimationFrame(animateExplosion);
+      
+      // Remove a bola de fogo
+      this.remove();
+    },
+    
+    remove: function() {
+      // Remove elementos da cena
+      scene.remove(this.mesh);
+      scene.remove(this.light);
+    }
   };
   
   // Adiciona à lista de projéteis

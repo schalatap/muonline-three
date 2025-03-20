@@ -37,20 +37,30 @@ function handlePlayerConnection(io, socket) {
     }
   });
 
-  // Processa ataques do jogador
+// Processa ataques do jogador
 socket.on('playerAttack', (data) => {
   if (players[socket.id]) {
+    // Garantir que temos um objeto data válido
+    data = data || {};
+    
     // Registra o tempo do último ataque
     const now = Date.now();
     players[socket.id].lastAttackTime = now;
     
     // Emite o evento de ataque para todos os jogadores
-    io.emit('playerAttack', {
+    // Verifica se targetId existe antes de incluí-lo no objeto
+    const attackData = {
       playerId: socket.id,
-      targetId: data.targetId,
       position: players[socket.id].position,
-      rotation: data.rotation
-    });
+      rotation: data.rotation || { y: 0 }
+    };
+    
+    // Adiciona targetId apenas se existir
+    if (data.targetId) {
+      attackData.targetId = data.targetId;
+    }
+    
+    io.emit('playerAttack', attackData);
     
     // Se temos um alvo específico, verificamos apenas esse alvo
     if (data.targetId && players[data.targetId]) {

@@ -3,7 +3,7 @@ let scene, camera, renderer;
 let localPlayer, players = {};
 let gameStarted = false;
 let projectiles = []; // Lista de projéteis (bolas de fogo, etc)
-let mousePosition = new THREE.Vector3(); // Posição atual do mouse no mundo
+let worldMousePosition = new THREE.Vector3(); // Posição atual do mouse no mundo 3D
 let raycaster = new THREE.Raycaster(); // Raycaster para selecionar alvo
 
 // Inicializa o jogo
@@ -48,12 +48,12 @@ function init() {
   // Event listener para clique do mouse (magia)
   document.addEventListener('click', onMouseClick);
   
-  // Event listener para rastreamento de posição do mouse
-  document.addEventListener('mousemove', onMouseMove);
+  // Event listener para rastreamento de posição do mouse no mundo 3D
+  document.addEventListener('mousemove', onMouseMoveWorld);
 }
 
-// Rastreia a posição do mouse para sistema de mira
-function onMouseMove(event) {
+// Rastreia a posição do mouse no mundo 3D para sistema de mira
+function onMouseMoveWorld(event) {
   // Ignora se o jogo não iniciou
   if (!gameStarted || !localPlayer) return;
   
@@ -70,7 +70,7 @@ function onMouseMove(event) {
   
   // Encontra interseção com o plano do chão
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  raycaster.ray.intersectPlane(groundPlane, mousePosition);
+  raycaster.ray.intersectPlane(groundPlane, worldMousePosition);
 }
 
 // Inicializa o HUD do jogo
@@ -145,8 +145,8 @@ function onMouseClick(event) {
         updateSpellCooldownHUD();
       }
     } else {
-      if (localPlayer.castSpell(mousePosition)) {
-        sendSpellCast(mousePosition);
+      if (localPlayer.castSpell(worldMousePosition)) {
+        sendSpellCast(worldMousePosition);
         updateSpellCooldownHUD();
       }
     }
@@ -254,7 +254,7 @@ function onMouseClick(event) {
       });
     } else {
       // Ataque no ar (direção do mouse)
-      localPlayer.attack(mousePosition);
+      localPlayer.attack(worldMousePosition);
       
       // Envia ataque normal para o servidor
       sendPlayerAttack({
