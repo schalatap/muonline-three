@@ -2,6 +2,13 @@ const { createPlayer, damagePlayer, recordKill, consumeMana, updateDerivedStats,
 const { getSpawnPoint } = require('./world');
 const { initializeMonsters, findRespawnPosition } = require('./monsterbase');
 const { MonsterTypes } = require('./monsters');
+const { 
+  serverCollisionManager, 
+  createMonsterCollidable,
+  COLLIDABLE_TYPES,
+  COLLIDER_SHAPES,
+  Collidable
+} = require('../shared/collision');
 
 // Store all connected players
 const players = {};
@@ -604,77 +611,53 @@ function handleChaseState(monster) {
     z: monster.position.z + direction.z * monster.stats.moveSpeed
   };
   
-  // Verificar colisão com outros monstros
-  let hasCollision = false;
+  // Verificar colisão usando o novo sistema
+  const tempPosition = { ...monster.position };
+  monster.position = newPosition;
   
-  for (const id in monsters) {
-    // Ignorar a si mesmo
-    if (id === monster.id) continue;
-    
-    // Ignorar monstros mortos
-    if (monsters[id].currentState === 'dead') continue;
-    
-    // Calcular distância entre a nova posição e o outro monstro
-    const otherMonster = monsters[id];
-    const dx = newPosition.x - otherMonster.position.x;
-    const dz = newPosition.z - otherMonster.position.z;
-    const distSq = dx * dx + dz * dz;
-    
-    // Distância mínima para evitar colisão
-    const minDist = 1.2; // Constante representando o tamanho do monstro
-    const minDistSq = minDist * minDist;
-    
-    if (distSq < minDistSq) {
-      hasCollision = true;
-      break;
-    }
-  }
+  // Atualizar posição do collidable
+  serverCollisionManager.updateCollidablePosition(monster.id, monster.position);
   
-  // Se não houver colisão, mova o monstro
-  if (!hasCollision) {
-    monster.position = newPosition;
-  } else {
-    // Se houver colisão, tente mover de lado
-    // Gerar um pequeno deslocamento lateral aleatório
+  // Verificar colisões com outros monstros
+  const collisions = serverCollisionManager.checkEntityCollisions(
+    monster.id,
+    [COLLIDABLE_TYPES.MONSTER, COLLIDABLE_TYPES.STATIC]
+  );
+  
+  // Se houver colisão, tentar movimento lateral
+  if (collisions.length > 0) {
+    // Reverter posição
+    monster.position = tempPosition;
+    serverCollisionManager.updateCollidablePosition(monster.id, monster.position);
+    
+    // Tenta mover para o lado
     const sideStep = (Math.random() > 0.5) ? 0.5 : -0.5;
     const sideDirection = {
       x: -direction.z * sideStep,
       z: direction.x * sideStep
     };
     
-    // Tenta mover para o lado
+    // Nova posição lateral
     const sidePosition = {
       x: monster.position.x + sideDirection.x * monster.stats.moveSpeed,
       y: monster.position.y,
       z: monster.position.z + sideDirection.z * monster.stats.moveSpeed
     };
     
-    // Verifica colisão na posição lateral
-    hasCollision = false;
+    // Testar colisão nesta nova posição
+    monster.position = sidePosition;
+    serverCollisionManager.updateCollidablePosition(monster.id, monster.position);
     
-    for (const id in monsters) {
-      if (id === monster.id) continue;
-      if (monsters[id].currentState === 'dead') continue;
-      
-      const otherMonster = monsters[id];
-      const dx = sidePosition.x - otherMonster.position.x;
-      const dz = sidePosition.z - otherMonster.position.z;
-      const distSq = dx * dx + dz * dz;
-      
-      const minDist = 1.2;
-      const minDistSq = minDist * minDist;
-      
-      if (distSq < minDistSq) {
-        hasCollision = true;
-        break;
-      }
-    }
+    const sideCollisions = serverCollisionManager.checkEntityCollisions(
+      monster.id,
+      [COLLIDABLE_TYPES.MONSTER, COLLIDABLE_TYPES.STATIC]
+    );
     
-    // Se não houver colisão na posição lateral, move para lá
-    if (!hasCollision) {
-      monster.position = sidePosition;
+    // Se ainda houver colisão, reverte para a posição original
+    if (sideCollisions.length > 0) {
+      monster.position = tempPosition;
+      serverCollisionManager.updateCollidablePosition(monster.id, monster.position);
     }
-    // Caso contrário, o monstro fica parado
   }
   
   // Atualiza rotação para olhar para o alvo
@@ -889,6 +872,9 @@ function playerAttackMonster(playerId, monsterId, attackDamage) {
 function handleMonsterDeath(monster, killerId) {
   monster.stats.health = 0;
   monster.currentState = 'dead';
+
+  // Desativar colisão do monstro no servidor
+  serverCollisionManager.disableCollisionForEntity(monster.id);
   
   // Notifica os clientes
   ioInstance.emit('monsterDead', {
@@ -951,6 +937,12 @@ function respawnMonster(monster) {
   monster.position = { ...respawnPosition };
   monster.currentState = 'idle';
   monster.targetId = null;
+
+  // Reativar colisão do monstro
+  serverCollisionManager.enableCollisionForEntity(monster.id);
+  
+  // Atualizar posição do collidable
+  serverCollisionManager.updateCollidablePosition(monster.id, monster.position);
   
   // Notifica os clientes
   ioInstance.emit('monsterSpawned', {

@@ -67,6 +67,9 @@ class GameWorld {
     
     // Adiciona uma muralha simples em volta
     this.createWall();
+
+    // Após criar todos os objetos, registramos seus collidables
+    this.registerWorldColliders();
   }
   
   // Cria uma fonte no centro da cidade
@@ -115,26 +118,6 @@ class GameWorld {
     
     scene.add(fountainGroup);
     this.objects.push(fountainGroup);
-    
-    // Adiciona um collider cilíndrico mais preciso para a fonte
-    // Usamos um raio um pouco menor para dar mais espaço de passagem
-    const radius = 2.8; // Um pouco menor que o raio visual da fonte
-    
-    // Criamos um cilindro invisível para visualização em desenvolvimento
-    const colliderGeometry = new THREE.CylinderGeometry(radius, radius, 3, 16);
-    const colliderMaterial = new THREE.MeshBasicMaterial({ 
-      color: 0xff0000, 
-      wireframe: true,
-      visible: false  // Invisível em produção, pode ser alterado para debug
-    });
-    const colliderMesh = new THREE.Mesh(colliderGeometry, colliderMaterial);
-    colliderMesh.position.set(x, y + 1.5, z);
-    scene.add(colliderMesh);
-    
-    // Criamos uma box de colisão a partir deste cilindro
-    // Isso é uma aproximação, já que THREE.Box3 não suporta formas cilíndricas diretamente
-    const boundingBox = new THREE.Box3().setFromObject(colliderMesh);
-    this.colliders.push(boundingBox);
   }
   
   // Cria uma construção simples
@@ -177,26 +160,6 @@ class GameWorld {
     
     scene.add(buildingGroup);
     this.objects.push(buildingGroup);
-    
-    // Adicionamos um collider ligeiramente menor que a construção
-    // para evitar que o jogador fique preso nas bordas
-    const colliderWidth = width * 0.95;
-    const colliderDepth = depth * 0.95;
-    
-    // Criamos um box de colisão invisível para visualização
-    const colliderGeometry = new THREE.BoxGeometry(colliderWidth, height, colliderDepth);
-    const colliderMaterial = new THREE.MeshBasicMaterial({ 
-      color: 0xff0000, 
-      wireframe: true,
-      visible: false  // Invisível em produção, pode ser alterado para debug
-    });
-    const colliderMesh = new THREE.Mesh(colliderGeometry, colliderMaterial);
-    colliderMesh.position.set(x, y + height/2, z);
-    scene.add(colliderMesh);
-    
-    // Adicionamos uma box de colisão a partir desta mesh
-    const boundingBox = new THREE.Box3().setFromObject(colliderMesh);
-    this.colliders.push(boundingBox);
   }
   
   // Cria uma árvore simples
@@ -230,25 +193,6 @@ class GameWorld {
     
     scene.add(treeGroup);
     this.objects.push(treeGroup);
-    
-    // Usa apenas o tronco para colisão, não a folhagem
-    // Isso permite que o jogador passe próximo à árvore mais facilmente
-    const radius = 0.5; // Um pouco menor que o raio visual do tronco
-    
-    // Criamos um cilindro invisível para colisão
-    const colliderGeometry = new THREE.CylinderGeometry(radius, radius, 2, 8);
-    const colliderMaterial = new THREE.MeshBasicMaterial({ 
-      color: 0xff0000, 
-      wireframe: true,
-      visible: false  // Invisível em produção, pode ser alterado para debug
-    });
-    const colliderMesh = new THREE.Mesh(colliderGeometry, colliderMaterial);
-    colliderMesh.position.set(x, y + 1, z);
-    scene.add(colliderMesh);
-    
-    // Criamos uma box de colisão a partir deste cilindro
-    const boundingBox = new THREE.Box3().setFromObject(colliderMesh);
-    this.colliders.push(boundingBox);
   }
   
   // Cria uma muralha simples em volta da cidade
@@ -278,30 +222,137 @@ class GameWorld {
       wall.receiveShadow = true;
       scene.add(wall);
       this.objects.push(wall);
-      
-      // Cria collider com dimensões levemente reduzidas para evitar problemas de precisão
-      const colliderWidth = width * 0.98;
-      const colliderDepth = depth * 0.98;
-      
-      const colliderGeometry = new THREE.BoxGeometry(colliderWidth, wallHeight, colliderDepth);
-      const colliderMaterial = new THREE.MeshBasicMaterial({
-        color: 0xff0000,
-        wireframe: true,
-        visible: false
-      });
-      const colliderMesh = new THREE.Mesh(colliderGeometry, colliderMaterial);
-      colliderMesh.position.copy(wall.position);
-      scene.add(colliderMesh);
-      
-      // Adiciona collider
-      const boundingBox = new THREE.Box3().setFromObject(colliderMesh);
-      this.colliders.push(boundingBox);
     }
+  }
+  
+  // Adicionar um novo método para registrar collidables
+  registerWorldColliders() {
+    // Fonte central
+    this.registerStaticCollider({
+      id: 'fountain',
+      type: 'cylinder',
+      x: 0, y: 0, z: 0,
+      radius: 2.8,
+      height: 3
+    });
+    
+    // Construções
+    this.registerStaticCollider({
+      id: 'building1',
+      type: 'box',
+      x: -15, y: 0, z: -15,
+      width: 5 * 0.95, // Reduzir levemente para evitar problemas de precisão
+      height: 4,
+      depth: 5 * 0.95
+    });
+    
+    this.registerStaticCollider({
+      id: 'building2',
+      type: 'box',
+      x: 15, y: 0, z: -15,
+      width: 7 * 0.95,
+      height: 5,
+      depth: 4 * 0.95
+    });
+    
+    this.registerStaticCollider({
+      id: 'building3',
+      type: 'box',
+      x: -15, y: 0, z: 15,
+      width: 6 * 0.95,
+      height: 4,
+      depth: 6 * 0.95
+    });
+    
+    this.registerStaticCollider({
+      id: 'building4',
+      type: 'box',
+      x: 15, y: 0, z: 15,
+      width: 5 * 0.95,
+      height: 3,
+      depth: 5 * 0.95
+    });
+    
+    // Árvores (apenas o tronco para colisão)
+    this.registerStaticCollider({
+      id: 'tree1',
+      type: 'cylinder',
+      x: -8, y: 0, z: -8,
+      radius: 0.5,
+      height: 2
+    });
+    
+    this.registerStaticCollider({
+      id: 'tree2',
+      type: 'cylinder',
+      x: 8, y: 0, z: -8,
+      radius: 0.5,
+      height: 2
+    });
+    
+    this.registerStaticCollider({
+      id: 'tree3',
+      type: 'cylinder',
+      x: -8, y: 0, z: 8,
+      radius: 0.5,
+      height: 2
+    });
+    
+    this.registerStaticCollider({
+      id: 'tree4',
+      type: 'cylinder',
+      x: 8, y: 0, z: 8,
+      radius: 0.5,
+      height: 2
+    });
+    
+    // Muralhas
+    this.registerStaticCollider({
+      id: 'wall_north',
+      type: 'box',
+      x: 0, y: 0, z: -50,
+      width: 100 * 0.98,
+      height: 3,
+      depth: 1 * 0.98
+    });
+    
+    this.registerStaticCollider({
+      id: 'wall_south',
+      type: 'box',
+      x: 0, y: 0, z: 50,
+      width: 100 * 0.98,
+      height: 3,
+      depth: 1 * 0.98
+    });
+    
+    this.registerStaticCollider({
+      id: 'wall_west',
+      type: 'box',
+      x: -50, y: 0, z: 0,
+      width: 1 * 0.98,
+      height: 3,
+      depth: 100 * 0.98
+    });
+    
+    this.registerStaticCollider({
+      id: 'wall_east',
+      type: 'box',
+      x: 50, y: 0, z: 0,
+      width: 1 * 0.98,
+      height: 3,
+      depth: 100 * 0.98
+    });
+  }
+
+  // Método auxiliar para registrar collidables estáticos
+  registerStaticCollider(object) {
+    window.CollisionSystem.createStaticCollidable(object);
   }
   
   // Retorna a lista de colliders
   getColliders() {
-    return this.colliders;
+    // Usar o novo sistema
+    return window.CollisionSystem.collisionManager.getActiveColliderBoxes();
   }
 }
 

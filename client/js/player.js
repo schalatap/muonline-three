@@ -256,10 +256,17 @@ class Player {
   // Update collision box
   updateCollider() {
     const pos = this.mesh.position;
+    
+    // Atualiza o collider interno (para compatibilidade)
     this.collider = new THREE.Box3(
       new THREE.Vector3(pos.x - this.radius, pos.y, pos.z - this.radius),
       new THREE.Vector3(pos.x + this.radius, pos.y + this.height, pos.z + this.radius)
     );
+    
+    // Atualiza a posição no sistema de colisão unificado
+    if (window.CollisionSystem && window.CollisionSystem.collisionManager) {
+      window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, pos);
+    }
   }
   
   // Move player
@@ -269,151 +276,69 @@ class Player {
     // Normalize direction
     direction.normalize();
     
-    // Improved sliding collision handling with special case for monsters
-    let moved = false;
+    // Posição original para reverter em caso de colisão
     const originalPosition = this.mesh.position.clone();
+    let moved = false;
     
-    // Separate colliders into static world and dynamic entities
-    const staticColliders = [];
-    const monsterColliders = [];
-    
-    // Separate monster colliders from world colliders for special treatment
-    for (const collider of worldColliders) {
-      // Check if this is a monster collider (we can do this by checking if the monsters object
-      // has any monster with this collider)
-      let isMonsterCollider = false;
-      
-      if (window.monsters) {
-        for (const id in window.monsters) {
-          if (window.monsters[id].collider === collider) {
-            monsterColliders.push(collider);
-            isMonsterCollider = true;
-            break;
-          }
-        }
-      }
-      
-      if (!isMonsterCollider) {
-        staticColliders.push(collider);
-      }
-    }
-    
-    // Try moving on X axis
+    // Tentar mover no eixo X
     if (Math.abs(direction.x) > 0.01) {
       const step = direction.x * speed;
       this.mesh.position.x += step;
-      this.updateCollider();
       
-      // First check static world collisions (always block movement)
-      let staticCollision = false;
-      for (const collider of staticColliders) {
-        if (this.collider.intersectsBox(collider)) {
-          staticCollision = true;
-          break;
-        }
-      }
+      // Atualizar o collidable do player
+      window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
       
-      if (staticCollision) {
-        // Reset position on X axis
+      // Verificar colisões
+      const collisions = window.CollisionSystem.collisionManager.checkEntityCollisions(
+        this.id, 
+        [window.CollisionSystem.COLLIDABLE_TYPES.STATIC, window.CollisionSystem.COLLIDABLE_TYPES.MONSTER]
+      );
+      
+      if (collisions.length > 0) {
+        // Reverter movimento no eixo X
         this.mesh.position.x = originalPosition.x;
-        this.updateCollider();
+        window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
       } else {
-        // Check monster collisions with sliding possibility
-        let monsterCollision = false;
-        for (const collider of monsterColliders) {
-          if (this.collider.intersectsBox(collider)) {
-            monsterCollision = true;
-            
-            // Try to slide around the monster slightly (on Z)
-            // This helps prevent getting stuck on monsters
-            const slideDirection = (Math.random() > 0.5) ? 0.5 : -0.5;
-            this.mesh.position.z += slideDirection * speed * 0.5;
-            this.updateCollider();
-            
-            // If still colliding, revert Z position too
-            if (this.collider.intersectsBox(collider)) {
-              this.mesh.position.z = originalPosition.z;
-              this.updateCollider();
-            }
-            
-            break;
-          }
-        }
-        
-        if (!monsterCollision) {
-          moved = true;
-        } else {
-          // Revert X position
-          this.mesh.position.x = originalPosition.x;
-          this.updateCollider();
-        }
+        moved = true;
       }
     }
     
-    // Try moving on Z axis
+    // Tentar mover no eixo Z
     if (Math.abs(direction.z) > 0.01) {
       const step = direction.z * speed;
       this.mesh.position.z += step;
-      this.updateCollider();
       
-      // First check static world collisions
-      let staticCollision = false;
-      for (const collider of staticColliders) {
-        if (this.collider.intersectsBox(collider)) {
-          staticCollision = true;
-          break;
-        }
-      }
+      // Atualizar o collidable do player
+      window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
       
-      if (staticCollision) {
-        // Reset position on Z axis
+      // Verificar colisões
+      const collisions = window.CollisionSystem.collisionManager.checkEntityCollisions(
+        this.id, 
+        [window.CollisionSystem.COLLIDABLE_TYPES.STATIC, window.CollisionSystem.COLLIDABLE_TYPES.MONSTER]
+      );
+      
+      if (collisions.length > 0) {
+        // Reverter movimento no eixo Z
         this.mesh.position.z = originalPosition.z;
-        this.updateCollider();
+        window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
       } else {
-        // Check monster collisions with sliding possibility
-        let monsterCollision = false;
-        for (const collider of monsterColliders) {
-          if (this.collider.intersectsBox(collider)) {
-            monsterCollision = true;
-            
-            // Try to slide around the monster slightly (on X)
-            const slideDirection = (Math.random() > 0.5) ? 0.5 : -0.5;
-            this.mesh.position.x += slideDirection * speed * 0.5;
-            this.updateCollider();
-            
-            // If still colliding, revert X position too
-            if (this.collider.intersectsBox(collider)) {
-              this.mesh.position.x = originalPosition.x;
-              this.updateCollider();
-            }
-            
-            break;
-          }
-        }
-        
-        if (!monsterCollision) {
-          moved = true;
-        } else {
-          // Revert Z position
-          this.mesh.position.z = originalPosition.z;
-          this.updateCollider();
-        }
+        moved = true;
       }
     }
     
-    // If we moved, update the rotation and position
+    // Se moveu, atualizar rotação e posição
     if (moved) {
-      // Update rotation to face movement direction
+      // Atualizar rotação para a direção do movimento
       const angle = Math.atan2(direction.x, direction.z);
       this.mesh.rotation.y = angle;
       
-      // Update the last valid position
+      // Atualizar posição válida
       this.lastValidPosition.copy(this.mesh.position);
       
-      // Animate walking
+      // Animar caminhada
       this.animateWalk();
     } else if (this.checkCollisions(worldColliders)) {
-      // If still stuck, try emergency escape
+      // Se ainda estiver preso, tentar escapar
       this.escapeCollision(worldColliders);
     }
     
@@ -441,35 +366,15 @@ class Player {
     }
   }
   
-  // Check for collisions
+  // Substituir o método checkCollisions
   checkCollisions(worldColliders) {
-    // Verifica colisão com objetos do mundo
-    for (const collider of worldColliders) {
-      if (this.collider.intersectsBox(collider)) {
-        return true;
-      }
-    }
+    // Usar o gerenciador de colisões unificado
+    const collisions = window.CollisionSystem.collisionManager.checkEntityCollisions(
+      this.id, 
+      [window.CollisionSystem.COLLIDABLE_TYPES.STATIC, window.CollisionSystem.COLLIDABLE_TYPES.MONSTER]
+    );
     
-    // Verifica colisão com outros jogadores
-    for (const id in players) {
-      if (id !== this.id) {
-        if (this.collider.intersectsBox(players[id].collider)) {
-          return true;
-        }
-      }
-    }
-    
-    // Verifica colisão com monstros
-    if (typeof monsters !== 'undefined') {
-      for (const id in monsters) {
-        const monster = monsters[id];
-        if (monster.collider && this.collider.intersectsBox(monster.collider)) {
-          return true;
-        }
-      }
-    }
-    
-    return false;
+    return collisions.length > 0;
   }
   
   // Try to escape collision
@@ -897,6 +802,12 @@ class Player {
 function createPlayer(id, position, isLocal = false) {
   const player = new Player(id, position, isLocal);
   players[id] = player;
+  
+  // Register the player's collidable
+  if (window.CollisionSystem) {
+    window.CollisionSystem.createPlayerCollidable(player);
+  }
+  
   return player;
 }
 

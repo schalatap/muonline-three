@@ -4,6 +4,13 @@ const socketIO = require('socket.io');
 const path = require('path');
 const { handlePlayerConnection } = require('./game');
 
+const { 
+  CollisionManager, 
+  Collidable, 
+  COLLIDABLE_TYPES, 
+  COLLIDER_SHAPES
+} = require('../shared/collision');
+
 // Configuração do Express
 const app = express();
 const server = http.createServer(app);

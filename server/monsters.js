@@ -2,6 +2,11 @@
  * Definições de monstros para o jogo
  */
 
+const { 
+  createMonsterCollidable,
+  serverCollisionManager
+} = require('../shared/collision');
+
 // Tipos de monstros
 const MonsterTypes = {
     // Monstro básico
@@ -57,7 +62,7 @@ const MonsterTypes = {
       return null;
     }
     
-    return {
+    const monster = {
       id: `${monsterType.id}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
       type: type,
       name: monsterType.name,
@@ -78,6 +83,11 @@ const MonsterTypes = {
         respawn: null
       }
     };
+    
+    // Registrar collidable do monstro no servidor
+    createMonsterCollidable(monster);
+    
+    return monster;
   }
   
   module.exports = {

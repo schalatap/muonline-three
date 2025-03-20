@@ -27,6 +27,9 @@ function init() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
   
+  // Inicializar o sistema de colisão
+  initCollisionSystem();
+  
   // Initialize subsystems
   initWorld();
   initInputSystem();
@@ -61,6 +64,20 @@ function init() {
       }
     });
   }
+}
+
+// Função para inicializar o sistema de colisão
+function initCollisionSystem() {
+  console.log("Inicializando sistema de colisão unificado");
+  
+  // Garantir que o sistema está disponível
+  if (!window.CollisionSystem) {
+    console.error("Sistema de colisão não encontrado. Verifique se collision.js foi carregado corretamente.");
+    return;
+  }
+  
+  // Limpar o gerenciador de colisões (caso já exista)
+  window.CollisionSystem.collisionManager = new window.CollisionSystem.CollisionManager();
 }
 
 // Create experience bar
@@ -572,20 +589,25 @@ function updateProjectiles() {
   }
 }
 
-// Adicione esta função ao client/js/game.js para obter todos os colliders
 function getAllColliders() {
-  const colliders = getWorldColliders() || [];
-  
-  // Adiciona colliders de monstros
-  if (typeof monsters !== 'undefined') {
-    for (const id in monsters) {
-      if (monsters[id].collider) {
-        colliders.push(monsters[id].collider);
+  // Verificar se o sistema de colisão está disponível
+  if (window.CollisionSystem && window.CollisionSystem.collisionManager) {
+    return window.CollisionSystem.collisionManager.getActiveColliderBoxes();
+  } else {
+    console.warn("Sistema de colisão não está disponível. Usando sistema antigo.");
+    // Fallback para o sistema antigo
+    const colliders = getWorldColliders() || [];
+    
+    if (typeof monsters !== 'undefined') {
+      for (const id in monsters) {
+        if (monsters[id].collider) {
+          colliders.push(monsters[id].collider);
+        }
       }
     }
+    
+    return colliders;
   }
-  
-  return colliders;
 }
 
 // Update local player based on inputs
@@ -595,7 +617,7 @@ function updateLocalPlayer() {
   if (moveDirection.length() > 0) {
     // Try to move player, respecting collisions
     const SPEED = localPlayer.moveSpeed || 0.15;
-    // Use getAllColliders em vez de getWorldColliders
+    // Usar o novo sistema de colisão
     const moved = localPlayer.move(moveDirection, SPEED, getAllColliders());
     
     if (moved) {
@@ -611,23 +633,20 @@ function updateLocalPlayer() {
         }
       });
     } else {
-      // If movement failed, check if stuck
-      // Use getAllColliders aqui também
-      if (localPlayer.checkCollisions(getAllColliders())) {
-        const escaped = localPlayer.escapeCollision(getAllColliders());
-        
-        if (escaped) {
-          sendPlayerMove({
-            position: {
-              x: localPlayer.mesh.position.x,
-              y: localPlayer.mesh.position.y,
-              z: localPlayer.mesh.position.z
-            },
-            rotation: {
-              y: localPlayer.mesh.rotation.y
-            }
-          });
-        }
+      // Verificar escape de colisão
+      const escaped = localPlayer.escapeCollision(getAllColliders());
+      
+      if (escaped) {
+        sendPlayerMove({
+          position: {
+            x: localPlayer.mesh.position.x,
+            y: localPlayer.mesh.position.y,
+            z: localPlayer.mesh.position.z
+          },
+          rotation: {
+            y: localPlayer.mesh.rotation.y
+          }
+        });
       }
     }
   }

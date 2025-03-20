@@ -302,7 +302,10 @@ function createMonster(monsterData) {
       // Atualiza o estado
       this.state = 'dead';
       
-      // Remove o collider
+      // Desativa a colisão do monstro quando ele morre
+      window.CollisionSystem.collisionManager.disableCollisionForEntity(this.id);
+  
+      // Remove o collider antigo
       this.collider = null;
       
       // Animação de morte
@@ -383,6 +386,16 @@ function createMonster(monsterData) {
   
   if (DEBUG_MONSTERS) console.log("Monstro criado com sucesso:", monster.id);
   
+  // Registrar o collidable do monstro
+  if (monster.mesh) {
+    window.CollisionSystem.createMonsterCollidable(monster);
+    
+    // Importante: se o monstro estiver morto, desabilitar sua colisão
+    if (monster.state === 'dead') {
+      window.CollisionSystem.collisionManager.disableCollisionForEntity(monster.id);
+    }
+  }
+  
   return monster;
 }
 
@@ -390,6 +403,10 @@ function createMonster(monsterData) {
 function removeMonster(id) {
   if (monsters[id]) {
     if (DEBUG_MONSTERS) console.log("Removendo monstro:", id);
+    
+    // Remover o collidable do gerenciador
+    window.CollisionSystem.collisionManager.disableCollisionForEntity(id);
+    
     monsters[id].destroy();
     delete monsters[id];
   }
@@ -492,13 +509,16 @@ function updateMonsterColliders() {
   for (const id in monsters) {
     const monster = monsters[id];
     if (monster.mesh) {
-      // Cria/atualiza o collider para o monstro
-      // Calculamos um collider mais justo e apropriado
-      const pos = monster.mesh.position;
-      const monsterSize = monster.type === 'GOBLIN' ? 0.6 : 0.7; // Reduzido para ser mais justo visualmente
-      monster.radius = monsterSize; // Armazena para uso em outras funções
+      // Atualizar a posição do collidable no gerenciador unificado
+      window.CollisionSystem.collisionManager.updateCollidablePosition(monster.id, monster.mesh.position);
       
-      // Collider mais preciso e menor que o visual para colisões mais naturais
+      // Manter o radius para referência
+      monster.radius = monster.type === 'GOBLIN' ? 0.6 : 0.7;
+      
+      // Ainda mantemos uma referência ao collider para compatibilidade
+      const pos = monster.mesh.position;
+      const monsterSize = monster.radius;
+      
       monster.collider = new THREE.Box3(
         new THREE.Vector3(pos.x - monsterSize * 0.6, pos.y, pos.z - monsterSize * 0.6),
         new THREE.Vector3(pos.x + monsterSize * 0.6, pos.y + monsterSize * 2.0, pos.z + monsterSize * 0.6)
