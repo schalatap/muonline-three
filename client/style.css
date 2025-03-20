@@ -28,21 +28,59 @@ body, html {
   bottom: 20px;
   left: 20px;
   z-index: 10;
+  width: 200px;
 }
 
-#health-bar {
-  width: 200px;
+/* Status bars styling */
+.status-bar {
+  width: 100%;
   height: 20px;
   background-color: #333;
   border: 2px solid #000;
   margin-bottom: 5px;
+  position: relative;
 }
 
-#health-fill {
-  width: 100%;
+.status-bar-fill {
   height: 100%;
-  background-color: #f00;
   transition: width 0.3s ease-in-out;
+}
+
+.status-bar-label {
+  position: absolute;
+  width: 100%;
+  text-align: center;
+  color: white;
+  font-size: 12px;
+  line-height: 20px;
+  text-shadow: 1px 1px 1px black;
+  z-index: 1;
+}
+
+/* Health bar specific */
+#health-fill {
+  background-color: #e74c3c;
+  width: 100%;
+}
+
+/* Mana bar specific */
+#mana-fill {
+  background-color: #3498db;
+  width: 100%;
+}
+
+/* Stamina bar specific */
+#stamina-fill {
+  background-color: #27ae60; /* Verde */
+  width: 100%;
+}
+
+/* Modifique o layout dos status bars */
+#status-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
 }
 
 #player-info {
@@ -67,16 +105,132 @@ body, html {
   z-index: 100;
 }
 
-/* Estilos do Chat */
+/* Character Stats Panel */
+#stats-panel {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 220px;
+  background-color: rgba(0, 0, 0, 0.7);
+  border: 2px solid #444;
+  border-radius: 5px;
+  color: white;
+  padding: 10px;
+  z-index: 20;
+  transform: translateX(240px); /* Hidden by default */
+  transition: transform 0.3s ease-in-out;
+}
+
+#stats-panel.visible {
+  transform: translateX(0);
+}
+
+.stats-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #555;
+}
+
+.stats-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+#stat-points {
+  font-size: 14px;
+  color: #f1c40f;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.stat-label {
+  flex: 1;
+  font-size: 14px;
+}
+
+.stat-value {
+  width: 30px;
+  text-align: center;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  padding: 2px 0;
+  margin-right: 5px;
+}
+
+.stat-button {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background-color: #3498db;
+  color: white;
+  border: 1px solid #2980b9;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.stat-button:hover {
+  background-color: #2980b9;
+}
+
+.stat-button:disabled {
+  background-color: #555;
+  border-color: #444;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.stats-footer {
+  margin-top: 10px;
+  padding-top: 5px;
+  border-top: 1px solid #555;
+  font-size: 12px;
+}
+
+.derived-stat {
+  margin-bottom: 5px;
+}
+
+#toggle-stats {
+  position: absolute;
+  top: 0;
+  left: -50px;
+  width: 50px;
+  height: 30px;
+  background-color: rgba(0, 0, 0, 0.7);
+  border: 2px solid #444;
+  border-right: none;
+  border-radius: 5px 0 0 5px;
+  color: white;
+  cursor: pointer;
+}
+
+/* Centered Chat */
 #chat-container {
-  position: relative;
-  width: 300px;
+  position: absolute;
+  width: 500px;
+  max-width: 80%;
   height: 200px;
   background-color: rgba(0, 0, 0, 0.5);
   border-radius: 5px;
   display: flex;
   flex-direction: column;
   z-index: 10;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 100px;
 }
 
 #chat-messages {
@@ -151,8 +305,7 @@ body, html {
   border-color: white transparent transparent transparent;
 }
 
-
-/* Estilo para números de dano */
+/* Damage number styling */
 .damage-number {
   position: absolute;
   font-size: 18px;
@@ -164,11 +317,16 @@ body, html {
   user-select: none;
 }
 
-/* Estilos para o HUD de magias */
-#spell-hud {
+/* Enhanced Spell HUD */
+#spell-bar {
   position: absolute;
-  bottom: 70px;
-  left: 20px;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  gap: 10px;
+}
+
+.spell-icon {
   width: 40px;
   height: 40px;
   background-color: rgba(0, 0, 0, 0.5);
@@ -177,37 +335,163 @@ body, html {
   display: flex;
   justify-content: center;
   align-items: center;
+  position: relative;
 }
 
-#spell-icon {
+.spell-icon-image {
   width: 30px;
   height: 30px;
-  background-color: #ff5500;
   border-radius: 50%;
   position: relative;
   overflow: hidden;
 }
 
-#spell-icon::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 80%;
-  height: 80%;
-  transform: translate(-50%, -50%);
+.fireball-icon {
   background: radial-gradient(circle, #ffcc00, #ff5500);
-  border-radius: 50%;
 }
 
-#spell-cooldown {
+.spell-cooldown-mask {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: white;
-  font-size: 18px;
-  font-weight: bold;
-  text-shadow: 1px 1px 2px #000;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(255, 0, 0, 0.5);
+  border-radius: 50%;
+  clip-path: polygon(50% 50%, 50% 0, 60% 0, 100% 0, 100% 100%, 0 100%, 0 0, 40% 0, 50% 0);
+  transform: rotate(0deg);
+  transform-origin: center;
+  transition: transform 0.1s linear;
+}
+
+.spell-cost {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: #3498db;
+  font-size: 10px;
+  padding: 1px 3px;
+  border-radius: 3px;
+}
+
+.spell-icon.disabled .spell-icon-image {
+  opacity: 0.5;
+}
+
+.spell-icon.disabled .spell-cost {
+  color: #e74c3c;
+}
+
+/* Target selection indicator */
+#target-indicator {
+  position: absolute;
+  border: 2px solid #ff0000;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 10;
   display: none;
+}
+
+/* Experience bar */
+#exp-bar {
+  position: absolute;
+  bottom: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 300px;
+  height: 5px;
+  background-color: #333;
+  border: 1px solid #000;
+  z-index: 10;
+}
+
+#exp-fill {
+  height: 100%;
+  background-color: #f1c40f;
+  width: 0%;
+  transition: width 0.3s ease-in-out;
+}
+
+/* Notification system */
+.notification {
+  position: absolute;
+  top: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 5px;
+  z-index: 100;
+  animation: fadeIn 0.3s, fadeOut 0.3s 2.7s;
+  pointer-events: none;
+}
+
+.notification.level-up {
+  background-color: rgba(241, 196, 15, 0.7);
+  color: black;
+  font-weight: bold;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translate(-50%, -20px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; transform: translate(-50%, 0); }
+  to { opacity: 0; transform: translate(-50%, -20px); }
+}
+
+
+/* Estilos para monstros */
+.monster-health-bar {
+  position: absolute;
+  width: 50px;
+  height: 5px;
+  pointer-events: none;
+  z-index: 10;
+  transform: translate(-50%, -50%);
+}
+
+.monster-health-background {
+  width: 100%;
+  height: 100%;
+  background-color: #333;
+  border: 1px solid #000;
+}
+
+.monster-health-fill {
+  width: 100%;
+  height: 100%;
+  background-color: #e74c3c;
+}
+
+.monster-name-tag {
+  position: absolute;
+  color: white;
+  text-shadow: 1px 1px 1px #000;
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 10;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+}
+
+/* Estilo para mostrar experiência ganha */
+.exp-gain {
+  position: absolute;
+  color: #f1c40f;
+  font-size: 16px;
+  font-weight: bold;
+  text-shadow: 1px 1px 1px #000;
+  pointer-events: none;
+  z-index: 100;
+  animation: floatUp 2s forwards;
+}
+
+@keyframes floatUp {
+  0% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-50px); }
 }

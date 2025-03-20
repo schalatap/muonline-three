@@ -1,116 +1,145 @@
-const { createPlayer } = require('./player');
+const { createPlayer, damagePlayer, recordKill, consumeMana, updateDerivedStats, levelUp } = require('./player');
 const { getSpawnPoint } = require('./world');
+const { initializeMonsters, findRespawnPosition } = require('./monsterbase');
+const { MonsterTypes } = require('./monsters');
 
-// Armazena todos os jogadores conectados
+// Store all connected players
 const players = {};
+const monsters = initializeMonsters();
 
-// Taxa de atualização do servidor (20 vezes por segundo)
+// Server update rate (20 times per second)
 const TICK_RATE = 50;
 let serverInterval;
+let ioInstance; // Para armazenar a instância do io
 
-// Gerencia a conexão de um novo jogador
+// Handle a new player connection
 function handlePlayerConnection(io, socket) {
-  // Cria um novo jogador
+  // Create a new player
+  ioInstance = io;
   const spawnPoint = getSpawnPoint();
   const player = createPlayer(socket.id, spawnPoint);
   players[socket.id] = player;
 
-  // Envia informações iniciais ao jogador
+  // Send initial information to player
   socket.emit('gameInit', {
     id: socket.id,
     position: player.position,
-    players: getPlayersData()
+    players: getPlayersData(),
+    stats: player.stats,
+    statPoints: player.statPoints
   });
 
-  // Anuncia o novo jogador para todos os outros
+  // Announce new player to others
   socket.broadcast.emit('playerJoined', {
     id: socket.id,
     position: player.position
   });
 
-  // Processa movimentos do jogador
+  // Process player movements
   socket.on('playerMove', (data) => {
     if (players[socket.id]) {
-      // Atualiza a posição e rotação
+      // Update position and rotation
       players[socket.id].position = data.position;
       players[socket.id].rotation = data.rotation;
     }
   });
 
-// Processa ataques do jogador
-socket.on('playerAttack', (data) => {
-  if (players[socket.id]) {
-    // Garantir que temos um objeto data válido
-    data = data || {};
-    
-    // Registra o tempo do último ataque
-    const now = Date.now();
-    players[socket.id].lastAttackTime = now;
-    
-    // Emite o evento de ataque para todos os jogadores
-    // Verifica se targetId existe antes de incluí-lo no objeto
-    const attackData = {
-      playerId: socket.id,
-      position: players[socket.id].position,
-      rotation: data.rotation || { y: 0 }
-    };
-    
-    // Adiciona targetId apenas se existir
-    if (data.targetId) {
-      attackData.targetId = data.targetId;
-    }
-    
-    io.emit('playerAttack', attackData);
-    
-    // Se temos um alvo específico, verificamos apenas esse alvo
-    if (data.targetId && players[data.targetId]) {
-      const attacker = players[socket.id];
-      const target = players[data.targetId];
-      
-      // Calcula distância entre atacante e alvo
-      const dx = target.position.x - attacker.position.x;
-      const dz = target.position.z - attacker.position.z;
-      const distance = Math.sqrt(dx * dx + dz * dz);
-      
-      // Verifica se está dentro do alcance de ataque
-      if (distance <= 2.5) { // Alcance do ataque melee
-        // Aplica dano ao alvo
-        const DAMAGE = 10;
-        target.health -= DAMAGE;
-        
-        // Atualiza estatísticas
-        attacker.statistics.damageDealt += DAMAGE;
-        target.statistics.damageReceived += DAMAGE;
-        
-        console.log(`Jogador ${data.targetId} atingido diretamente! Vida restante: ${target.health}`);
-        
-        // Envia evento de dano
-        io.emit('playerDamaged', {
-          id: data.targetId,
-          health: target.health,
-          attackerId: socket.id,
-          damage: DAMAGE
-        });
-        
-        // Verifica se o jogador morreu
-        if (target.health <= 0) {
-          handlePlayerDeath(data.targetId, socket.id, io);
-        }
+  // Process player attacks
+  socket.on('playerAttack', (data) => {
+    if (players[socket.id]) {
+      // Ensure we have a valid data object
+      data = data || {};
+
+      // Verificar se o jogador tem vigor suficiente
+      const STAMINA_COST = 10;
+      if (players[socket.id].stats.stamina < STAMINA_COST) {
+        socket.emit('attackFailed', { message: "Vigor insuficiente para atacar!" });
+        return;
       }
-    } else {
-      // Verificação normal de ataque para jogadores próximos
-      checkAttackCollisions(socket.id, players[socket.id].position, io);
+      
+      // Consumir vigor
+      players[socket.id].stats.stamina -= STAMINA_COST;
+      
+      // Record attack time
+      const now = Date.now();
+      players[socket.id].lastAttackTime = now;
+      
+      // Emit attack event to all players
+      const attackData = {
+        playerId: socket.id,
+        position: players[socket.id].position,
+        rotation: data.rotation || { y: 0 }
+      };
+      
+      // Add targetId if it exists
+      if (data.targetId) {
+        attackData.targetId = data.targetId;
+      }
+      
+      io.emit('playerAttack', attackData);
+
+      // Calcula dano baseado em força
+      const attacker = players[socket.id];
+      const BASE_DAMAGE = 5;
+      const strengthBonus = attacker.stats.strength * 0.5;
+      const DAMAGE = Math.floor(BASE_DAMAGE + strengthBonus);
+      
+      // Verifica se o ID alvo pertence a um monstro
+      if (data.targetId && (data.targetId.includes('goblin_') || data.targetId.includes('wolf_'))) {
+        playerAttackMonster(socket.id, data.targetId, DAMAGE);
+      }
+      // Verifica se é ataque em jogador
+      else if (data.targetId && players[data.targetId]) {
+        const target = players[data.targetId];
+        
+        // Calculate distance between attacker and target
+        const dx = target.position.x - attacker.position.x;
+        const dz = target.position.z - attacker.position.z;
+        const distance = Math.sqrt(dx * dx + dz * dz);
+        
+        // Check if within attack range
+        if (distance <= 2.5) { // Melee attack range
+          // Apply damage to target
+          target.stats.health -= DAMAGE;
+          
+          // Update statistics
+          attacker.statistics.damageDealt += DAMAGE;
+          target.statistics.damageReceived += DAMAGE;
+          
+          console.log(`Jogador ${data.targetId} atingido diretamente! Vida restante: ${target.stats.health}`);
+          
+          // Send damage event
+          io.emit('playerDamaged', {
+            id: data.targetId,
+            health: target.stats.health,
+            attackerId: socket.id,
+            damage: DAMAGE
+          });
+          
+          // Check if player died
+          if (target.stats.health <= 0) {
+            handlePlayerDeath(data.targetId, socket.id, io);
+          }
+        }
+      } 
+      // Verificação de área sem alvo específico
+      else {
+        // Verifica jogadores no alcance
+        checkAttackCollisions(socket.id, players[socket.id].position, io);
+        
+        // Verifica monstros no alcance
+        checkPlayerAttackHitMonsters(socket.id, players[socket.id].position, 2.5, DAMAGE);
+      }
     }
-  }
-});
+  });
   
-  // Processa mensagens de chat
+  // Process chat messages
   socket.on('chatMessage', (data) => {
-    // Verifica se a mensagem não está vazia e não é muito longa
+    // Check if message is valid
     const message = data.message.trim();
     if (!message || message.length > 100) return;
     
-    // Cria o objeto de mensagem
+    // Create message object
     const chatData = {
       senderId: socket.id,
       senderName: `Jogador ${socket.id.slice(0, 4)}`,
@@ -118,13 +147,13 @@ socket.on('playerAttack', (data) => {
       position: data.position
     };
     
-    // Envia para o próprio jogador primeiro
+    // Send to player first
     socket.emit('chatMessage', chatData);
     
-    // Envia apenas para jogadores próximos
-    const CHAT_RANGE = 15; // Distância máxima para receber mensagens
+    // Send only to nearby players
+    const CHAT_RANGE = 15; // Maximum distance to receive messages
     
-    // Enviar para outros jogadores dentro do alcance
+    // Send to other players within range
     for (const playerId in players) {
       if (playerId !== socket.id) {
         const otherPlayer = players[playerId];
@@ -133,14 +162,59 @@ socket.on('playerAttack', (data) => {
         const distance = Math.sqrt(dx * dx + dz * dz);
         
         if (distance <= CHAT_RANGE) {
-          // Jogador está próximo o suficiente para receber a mensagem
+          // Player is close enough to receive message
           io.to(playerId).emit('chatMessage', chatData);
         }
       }
     }
   });
 
-  // Gerencia a desconexão do jogador
+  // Handle stat point distribution
+  socket.on('allocateStat', (data) => {
+    if (!players[socket.id]) return;
+    
+    const player = players[socket.id];
+    const statName = data.stat;
+    
+    // Check if player has stat points to allocate
+    if (player.statPoints <= 0) {
+      socket.emit('statAllocationFailed', { 
+        message: "Você não tem pontos de status disponíveis." 
+      });
+      return;
+    }
+    
+    // Check if stat is valid
+    const validStats = ['strength', 'agility', 'vitality', 'energy'];
+    if (!validStats.includes(statName)) {
+      socket.emit('statAllocationFailed', { 
+        message: "Status inválido." 
+      });
+      return;
+    }
+    
+    // Armazena o valor anterior para o frontend saber o que foi aumentado
+    const previousValue = player.stats[statName];
+    
+    // Allocate the stat point
+    player.stats[statName]++;
+    player.statPoints--;
+    
+    // Update all derived stats
+    updateDerivedStats(player);
+    
+    // Send updated stats to player
+    socket.emit('statsUpdated', {
+      stats: player.stats,
+      statPoints: player.statPoints,
+      statLastIncreased: statName,
+      previousValue: previousValue
+    });
+    
+    console.log(`Jogador ${socket.id} aumentou ${statName} para ${player.stats[statName]}`);
+  });
+
+  // Handle player disconnection
   socket.on('disconnect', () => {
     console.log(`Jogador desconectado: ${socket.id}`);
     if (players[socket.id]) {
@@ -149,100 +223,172 @@ socket.on('playerAttack', (data) => {
     }
   });
 
-  // Se este for o primeiro jogador, inicia o loop do servidor
+  // Start server loop if this is the first player
   if (Object.keys(players).length === 1) {
     startServerLoop(io);
   }
 
-  // Processa lançamento de magias
-socket.on('spellCast', (data) => {
-  if (players[socket.id]) {
-    // Verifica cooldown de magia (anti-cheating)
-    const now = Date.now();
-    const lastSpellTime = players[socket.id].lastSpellTime || 0;
-    
-    if (now - lastSpellTime < 3000) { // 3 segundos de cooldown
-      return; // Ignora o lançamento se estiver em cooldown
-    }
-    
-    // Atualiza o tempo do último lançamento
-    players[socket.id].lastSpellTime = now;
-    
-    // Transmite o evento para todos os jogadores
-    io.emit('spellCast', {
-      playerId: socket.id,
-      position: players[socket.id].position,
-      targetPosition: data.targetPosition,
-      spellType: data.spellType
-    });
-  }
-});
+  // Process spell casting
+  socket.on('spellCast', (data) => {
+    if (players[socket.id]) {
+      // Check spell cooldown
+      const now = Date.now();
+      const lastSpellTime = players[socket.id].lastSpellTime || 0;
+      
+      if (now - lastSpellTime < 1500) { // 1.5 seconds cooldown
+        return; // Ignore if on cooldown
+      }
+      
+      // Check mana cost
+      const MANA_COST = 15;
+      if (players[socket.id].stats.mana < MANA_COST) {
+        socket.emit('spellCastFailed', { message: "Mana insuficiente." });
+        return;
+      }
 
-// Processa acerto de magia
-socket.on('spellHit', (data) => {
-  if (players[socket.id] && players[data.targetId]) {
-    // Verifica se o alvo existe e está ao alcance
-    const caster = players[socket.id];
-    const target = players[data.targetId];
-    
-    // Calcula distância entre lançador e alvo
-    const dx = caster.position.x - target.position.x;
-    const dz = caster.position.z - target.position.z;
-    const distance = Math.sqrt(dx * dx + dz * dz);
-    
-    const SPELL_MAX_RANGE = 20; // Alcance máximo da magia (anti-cheating)
-    
-    if (distance <= SPELL_MAX_RANGE) {
-      // Aplica dano ao alvo
-      target.health -= data.damage;
+      // Verificar vigor
+      const STAMINA_COST = 5;
+      if (players[socket.id].stats.stamina < STAMINA_COST) {
+        socket.emit('spellCastFailed', { message: "Vigor insuficiente para lançar magia!" });
+        return;
+      }
       
-      // Registra estatísticas
-      caster.statistics.damageDealt += data.damage;
-      target.statistics.damageReceived += data.damage;
+      // Consume recursos
+      players[socket.id].stats.mana -= MANA_COST;
+      players[socket.id].stats.stamina -= STAMINA_COST;
       
-      console.log(`Jogador ${data.targetId} atingido por magia! Vida restante: ${target.health}`);
+      // Update last cast time
+      players[socket.id].lastSpellTime = now;
       
-      // Envia evento de dano a todos
-      io.emit('spellHit', {
-        casterId: socket.id,
-        targetId: data.targetId,
-        damage: data.damage,
-        health: target.health,
+      // Broadcast spell cast to all players
+      io.emit('spellCast', {
+        playerId: socket.id,
+        position: players[socket.id].position,
+        targetPosition: data.targetPosition,
         spellType: data.spellType
       });
       
-      // Verifica se o jogador morreu
-      if (target.health <= 0) {
-        handlePlayerDeath(data.targetId, socket.id, io);
+      // Send updated mana to player
+      socket.emit('manaUpdated', { mana: players[socket.id].stats.mana });
+    }
+  });
+
+  // Process spell hits
+  socket.on('spellHit', (data) => {
+    if (players[socket.id] && players[data.targetId]) {
+      // Check if target exists and is in range
+      const caster = players[socket.id];
+      const target = players[data.targetId];
+      
+      // Calculate distance between caster and target
+      const dx = caster.position.x - target.position.x;
+      const dz = caster.position.z - target.position.z;
+      const distance = Math.sqrt(dx * dx + dz * dz);
+      
+      const SPELL_MAX_RANGE = 20; // Maximum spell range
+      
+      if (distance <= SPELL_MAX_RANGE) {
+        // Calculate magic damage based on caster's energy
+        const BASE_DAMAGE = 15;
+        const energyBonus = caster.stats.energy * 0.8;
+        const DAMAGE = Math.floor(BASE_DAMAGE + energyBonus);
+        
+        // Apply damage to target
+        target.stats.health -= DAMAGE;
+        
+        // Record statistics
+        caster.statistics.damageDealt += DAMAGE;
+        target.statistics.damageReceived += DAMAGE;
+        
+        console.log(`Jogador ${data.targetId} atingido por magia! Vida restante: ${target.stats.health}`);
+        
+        // Send damage event to all
+        io.emit('spellHit', {
+          casterId: socket.id,
+          targetId: data.targetId,
+          damage: DAMAGE,
+          health: target.stats.health,
+          spellType: data.spellType
+        });
+        
+        // Check if player died
+        if (target.stats.health <= 0) {
+          handlePlayerDeath(data.targetId, socket.id, io);
+        }
       }
     }
-  }
-});
+  });
+  socket.on('spellHitMonster', (data) => {
+    if (players[socket.id] && monsters[data.monsterId]) {
+      const player = players[socket.id];
+      const monster = monsters[data.monsterId];
+      
+      // Skip if monster is already dead
+      if (monster.currentState === 'dead') {
+        return;
+      }
+      
+      // Calculate magic damage based on caster's energy with diminishing returns
+      const BASE_DAMAGE = 15;
+      const energyBonus = Math.pow(player.stats.energy, 0.9) * 0.8; // Slightly diminishing returns
+      const DAMAGE = Math.floor(BASE_DAMAGE + energyBonus);
+      
+      // Apply damage to monster
+      monster.stats.health -= DAMAGE;
+      
+      // Record statistics
+      player.statistics.damageDealt += DAMAGE;
+      player.statistics.spellsCast += 1;
+      
+      console.log(`Jogador ${socket.id} atingiu monstro ${data.monsterId} com magia! Vida restante: ${monster.stats.health}`);
+      
+      // Notify all clients about monster damage
+      ioInstance.emit('monsterDamaged', {
+        id: data.monsterId,
+        health: monster.stats.health,
+        maxHealth: monster.stats.maxHealth,
+        attackerId: socket.id,
+        damage: DAMAGE,
+        isMagic: true   // Indica que foi dano mágico
+      });
+      
+      // If the monster was in idle state, change to chase
+      if (monster.currentState === 'idle') {
+        monster.targetId = socket.id;
+        monster.currentState = 'chase';
+      }
+      
+      // Check if monster died
+      if (monster.stats.health <= 0) {
+        handleMonsterDeath(monster, socket.id);
+      }
+    }
+  });
+
 }
 
-// Obtém dados de todos os jogadores
+// Get data for all players
 function getPlayersData() {
   const playersData = {};
   for (const id in players) {
     playersData[id] = {
       position: players[id].position,
       rotation: players[id].rotation,
-      health: players[id].health
+      stats: players[id].stats
     };
   }
   return playersData;
 }
 
-// Função de verificação de colisão de ataque revisada
+// Check for attack collisions
 function checkAttackCollisions(attackerId, attackPosition, io) {
-  const ATTACK_RANGE = 2.5; // Alcance do ataque (aumentado)
-  const ATTACK_DAMAGE = 10; // Dano do ataque
+  const ATTACK_RANGE = 2.5; // Attack range
   
   const attacker = players[attackerId];
   let hitAnyone = false;
   
   for (const id in players) {
-    // Não atacar a si mesmo
+    // Don't attack self
     if (id === attackerId) continue;
     
     const target = players[id];
@@ -251,27 +397,32 @@ function checkAttackCollisions(attackerId, attackPosition, io) {
     const distance = Math.sqrt(dx * dx + dz * dz);
     
     if (distance <= ATTACK_RANGE) {
-      // Aplica dano ao jogador
-      target.health -= ATTACK_DAMAGE;
+      // Calculate damage based on attacker's strength
+      const BASE_DAMAGE = 5;
+      const strengthBonus = attacker.stats.strength * 0.5;
+      const DAMAGE = Math.floor(BASE_DAMAGE + strengthBonus);
       
-      // Atualiza estatísticas
-      attacker.statistics.damageDealt += ATTACK_DAMAGE;
-      target.statistics.damageReceived += ATTACK_DAMAGE;
+      // Apply damage to player
+      target.stats.health -= DAMAGE;
       
-      console.log(`Jogador ${id} atingido! Vida restante: ${target.health}`);
+      // Update statistics
+      attacker.statistics.damageDealt += DAMAGE;
+      target.statistics.damageReceived += DAMAGE;
       
-      // Emite evento de dano
+      console.log(`Jogador ${id} atingido! Vida restante: ${target.stats.health}`);
+      
+      // Emit damage event
       io.emit('playerDamaged', {
         id: id,
-        health: target.health,
+        health: target.stats.health,
         attackerId: attackerId,
-        damage: ATTACK_DAMAGE
+        damage: DAMAGE
       });
       
       hitAnyone = true;
       
-      // Verifica se o jogador morreu
-      if (target.health <= 0) {
+      // Check if player died
+      if (target.stats.health <= 0) {
         handlePlayerDeath(id, attackerId, io);
       }
     }
@@ -280,14 +431,15 @@ function checkAttackCollisions(attackerId, attackPosition, io) {
   return hitAnyone;
 }
 
-// Gerencia a morte de um jogador
-function handlePlayerDeath(id, killerId, io) {
-  console.log(`Jogador ${id} foi eliminado por ${killerId}`);
+// Handle player death
+function handlePlayerDeath(id, killerId, io, isMonsterKill = false) {
+  console.log(`Jogador ${id} foi eliminado por ${isMonsterKill ? 'monstro' : 'jogador'} ${killerId}`);
   
   // Emite evento de morte
   io.emit('playerDeath', {
     id: id,
-    killerId: killerId
+    killerId: killerId,
+    isMonsterKill: isMonsterKill
   });
   
   // Notifica todos os jogadores próximos sobre a morte
@@ -301,10 +453,23 @@ function handlePlayerDeath(id, killerId, io) {
     const distance = Math.sqrt(dx * dx + dz * dz);
     
     if (distance <= CHAT_RANGE) {
+      // Cria mensagem apropriada
+      let message;
+      if (isMonsterKill) {
+        // Encontra o nome do monstro
+        let monsterName = "um monstro";
+        if (monsters[killerId]) {
+          monsterName = monsters[killerId].name;
+        }
+        message = `Jogador ${id.slice(0, 4)} foi eliminado por ${monsterName}`;
+      } else {
+        message = `Jogador ${id.slice(0, 4)} foi eliminado por Jogador ${killerId.slice(0, 4)}`;
+      }
+      
       // Envia mensagem de sistema aos jogadores próximos
       io.to(playerId).emit('chatMessage', {
         system: true,
-        message: `Jogador ${id.slice(0, 4)} foi eliminado por Jogador ${killerId.slice(0, 4)}`
+        message: message
       });
     }
   }
@@ -314,11 +479,14 @@ function handlePlayerDeath(id, killerId, io) {
     if (players[id]) {
       const spawnPoint = getSpawnPoint();
       players[id].position = spawnPoint;
-      players[id].health = 100;
+      players[id].stats.health = players[id].stats.maxHealth;
+      players[id].stats.mana = players[id].stats.maxMana;
+      players[id].stats.stamina = players[id].stats.maxStamina;
       
       io.emit('playerRespawn', {
         id: id,
-        position: spawnPoint
+        position: spawnPoint,
+        stats: players[id].stats
       });
       
       // Notifica o jogador sobre seu respawn
@@ -330,13 +498,579 @@ function handlePlayerDeath(id, killerId, io) {
   }, 5000);
 }
 
-// Inicia o loop principal do servidor
+
+
+// Monstros
+
+// Função para atualizar o estado dos monstros
+function updateMonsters() {
+  const now = Date.now();
+  
+  // Atualiza cada monstro
+  for (const id in monsters) {
+    const monster = monsters[id];
+    
+    // Só processa monstros ativos
+    if (monster.currentState === 'dead') continue;
+    
+    // Comportamento baseado no estado atual
+    switch (monster.currentState) {
+      case 'idle':
+        handleIdleState(monster);
+        break;
+      case 'chase':
+        handleChaseState(monster);
+        break;
+      case 'attack':
+        handleAttackState(monster, now);
+        break;
+      case 'return':
+        handleReturnState(monster);
+        break;
+    }
+  }
+}
+
+// Comportamento do monstro quando está ocioso
+function handleIdleState(monster) {
+  // Verifica se há jogadores próximos para aggrear
+  let nearestPlayer = null;
+  let nearestDistance = Infinity;
+  
+  for (const id in players) {
+    const player = players[id];
+    
+    // Calcula distância
+    const dx = player.position.x - monster.position.x;
+    const dz = player.position.z - monster.position.z;
+    const distSq = dx * dx + dz * dz;
+    
+    // Verifica se está no alcance de aggro
+    if (distSq < monster.stats.aggroRange * monster.stats.aggroRange) {
+      if (distSq < nearestDistance) {
+        nearestDistance = distSq;
+        nearestPlayer = player;
+      }
+    }
+  }
+  
+  // Se encontrou um jogador, começa a perseguir
+  if (nearestPlayer) {
+    monster.targetId = nearestPlayer.id;
+    monster.currentState = 'chase';
+  }
+}
+
+function handleChaseState(monster) {
+  // Verifica se o alvo ainda existe
+  if (!monster.targetId || !players[monster.targetId]) {
+    monster.targetId = null;
+    monster.currentState = 'return';
+    return;
+  }
+  
+  const target = players[monster.targetId];
+  
+  // Calcula distância
+  const dx = target.position.x - monster.position.x;
+  const dz = target.position.z - monster.position.z;
+  const distSq = dx * dx + dz * dz;
+  
+  // Verifica se está no alcance de ataque
+  if (distSq <= monster.stats.attackRange * monster.stats.attackRange) {
+    monster.currentState = 'attack';
+    return;
+  }
+  
+  // Verifica se o jogador está muito longe (além do alcance de perseguição)
+  if (distSq > monster.stats.chaseRange * monster.stats.chaseRange) {
+    monster.targetId = null;
+    monster.currentState = 'return';
+    return;
+  }
+  
+  // Determina direção para o jogador
+  const direction = { x: dx, z: dz };
+  const length = Math.sqrt(distSq);
+  
+  // Normaliza e aplica velocidade
+  direction.x /= length;
+  direction.z /= length;
+  
+  // Calcular nova posição tentativa
+  const newPosition = {
+    x: monster.position.x + direction.x * monster.stats.moveSpeed,
+    y: monster.position.y,
+    z: monster.position.z + direction.z * monster.stats.moveSpeed
+  };
+  
+  // Verificar colisão com outros monstros
+  let hasCollision = false;
+  
+  for (const id in monsters) {
+    // Ignorar a si mesmo
+    if (id === monster.id) continue;
+    
+    // Ignorar monstros mortos
+    if (monsters[id].currentState === 'dead') continue;
+    
+    // Calcular distância entre a nova posição e o outro monstro
+    const otherMonster = monsters[id];
+    const dx = newPosition.x - otherMonster.position.x;
+    const dz = newPosition.z - otherMonster.position.z;
+    const distSq = dx * dx + dz * dz;
+    
+    // Distância mínima para evitar colisão
+    const minDist = 1.2; // Constante representando o tamanho do monstro
+    const minDistSq = minDist * minDist;
+    
+    if (distSq < minDistSq) {
+      hasCollision = true;
+      break;
+    }
+  }
+  
+  // Se não houver colisão, mova o monstro
+  if (!hasCollision) {
+    monster.position = newPosition;
+  } else {
+    // Se houver colisão, tente mover de lado
+    // Gerar um pequeno deslocamento lateral aleatório
+    const sideStep = (Math.random() > 0.5) ? 0.5 : -0.5;
+    const sideDirection = {
+      x: -direction.z * sideStep,
+      z: direction.x * sideStep
+    };
+    
+    // Tenta mover para o lado
+    const sidePosition = {
+      x: monster.position.x + sideDirection.x * monster.stats.moveSpeed,
+      y: monster.position.y,
+      z: monster.position.z + sideDirection.z * monster.stats.moveSpeed
+    };
+    
+    // Verifica colisão na posição lateral
+    hasCollision = false;
+    
+    for (const id in monsters) {
+      if (id === monster.id) continue;
+      if (monsters[id].currentState === 'dead') continue;
+      
+      const otherMonster = monsters[id];
+      const dx = sidePosition.x - otherMonster.position.x;
+      const dz = sidePosition.z - otherMonster.position.z;
+      const distSq = dx * dx + dz * dz;
+      
+      const minDist = 1.2;
+      const minDistSq = minDist * minDist;
+      
+      if (distSq < minDistSq) {
+        hasCollision = true;
+        break;
+      }
+    }
+    
+    // Se não houver colisão na posição lateral, move para lá
+    if (!hasCollision) {
+      monster.position = sidePosition;
+    }
+    // Caso contrário, o monstro fica parado
+  }
+  
+  // Atualiza rotação para olhar para o alvo
+  monster.rotation.y = Math.atan2(direction.x, direction.z);
+}
+
+// Comportamento quando está atacando
+function handleAttackState(monster, now) {
+  // Verifica se o alvo ainda existe
+  if (!monster.targetId || !players[monster.targetId]) {
+    monster.targetId = null;
+    monster.currentState = 'return';
+    return;
+  }
+  
+  const target = players[monster.targetId];
+  
+  // Calcula distância
+  const dx = target.position.x - monster.position.x;
+  const dz = target.position.z - monster.position.z;
+  const distSq = dx * dx + dz * dz;
+  
+  // Verifica se ainda está no alcance de ataque
+  if (distSq > monster.stats.attackRange * monster.stats.attackRange) {
+    monster.currentState = 'chase';
+    return;
+  }
+  
+  // Atualiza rotação para olhar para o alvo
+  const direction = { x: dx, z: dz };
+  const length = Math.sqrt(distSq);
+  direction.x /= length;
+  direction.z /= length;
+  monster.rotation.y = Math.atan2(direction.x, direction.z);
+  
+  // Verifica cooldown de ataque
+  const attackCooldown = monster.stats.attackSpeed * 1000; // Converte para ms
+  if (now - monster.lastAttackTime >= attackCooldown) {
+    // Realiza o ataque
+    attackPlayer(monster, target);
+    monster.lastAttackTime = now;
+  }
+}
+
+// Comportamento quando está retornando ao ponto de spawn
+function handleReturnState(monster) {
+  // Código existente para calcular distância até o ponto de spawn
+  const dx = monster.spawnPosition.x - monster.position.x;
+  const dz = monster.spawnPosition.z - monster.position.z;
+  const distSq = dx * dx + dz * dz;
+  
+  // Se chegou ao ponto de spawn, volta para idle
+  if (distSq < 1) {
+    monster.currentState = 'idle';
+    return;
+  }
+  
+  // Determina direção para o ponto de spawn
+  const direction = { x: dx, z: dz };
+  const length = Math.sqrt(distSq);
+  
+  // Normaliza e aplica velocidade
+  direction.x /= length;
+  direction.z /= length;
+  
+  // Calcular nova posição tentativa
+  const newPosition = {
+    x: monster.position.x + direction.x * monster.stats.moveSpeed,
+    y: monster.position.y,
+    z: monster.position.z + direction.z * monster.stats.moveSpeed
+  };
+  
+  // Verificar colisão com outros monstros
+  let hasCollision = false;
+  
+  for (const id in monsters) {
+    if (id === monster.id) continue;
+    if (monsters[id].currentState === 'dead') continue;
+    
+    const otherMonster = monsters[id];
+    const dx = newPosition.x - otherMonster.position.x;
+    const dz = newPosition.z - otherMonster.position.z;
+    const distSq = dx * dx + dz * dz;
+    
+    const minDist = 1.2;
+    const minDistSq = minDist * minDist;
+    
+    if (distSq < minDistSq) {
+      hasCollision = true;
+      break;
+    }
+  }
+  
+  // Se não houver colisão, mova o monstro
+  if (!hasCollision) {
+    monster.position = newPosition;
+  } else {
+    // Se houver colisão, tente mover de lado
+    const sideStep = (Math.random() > 0.5) ? 0.5 : -0.5;
+    const sideDirection = {
+      x: -direction.z * sideStep,
+      z: direction.x * sideStep
+    };
+    
+    // Tenta mover para o lado
+    const sidePosition = {
+      x: monster.position.x + sideDirection.x * monster.stats.moveSpeed,
+      y: monster.position.y,
+      z: monster.position.z + sideDirection.z * monster.stats.moveSpeed
+    };
+    
+    // Verifica colisão na posição lateral
+    hasCollision = false;
+    
+    for (const id in monsters) {
+      if (id === monster.id) continue;
+      if (monsters[id].currentState === 'dead') continue;
+      
+      const otherMonster = monsters[id];
+      const dx = sidePosition.x - otherMonster.position.x;
+      const dz = sidePosition.z - otherMonster.position.z;
+      const distSq = dx * dx + dz * dz;
+      
+      const minDist = 1.2;
+      const minDistSq = minDist * minDist;
+      
+      if (distSq < minDistSq) {
+        hasCollision = true;
+        break;
+      }
+    }
+    
+    // Se não houver colisão na posição lateral, move para lá
+    if (!hasCollision) {
+      monster.position = sidePosition;
+    }
+    // Caso contrário, o monstro fica parado
+  }
+  
+  // Atualiza rotação para olhar para o ponto de spawn
+  monster.rotation.y = Math.atan2(direction.x, direction.z);
+}
+
+// Função para um monstro atacar um jogador
+function attackPlayer(monster, player) {
+  // Calcula dano
+  const damage = monster.stats.attackDamage;
+  
+  // Aplica dano
+  player.stats.health -= damage;
+  
+  // Garante que a vida não caia abaixo de 0
+  if (player.stats.health < 0) {
+    player.stats.health = 0;
+  }
+  
+  // Notifica o cliente - Use ioInstance em vez de io
+  ioInstance.emit('playerDamaged', {
+    id: player.id,
+    health: player.stats.health,
+    attackerId: monster.id,
+    damage: damage,
+    isMonster: true
+  });
+  
+  console.log(`Monstro ${monster.name} atacou jogador ${player.id}! Vida restante: ${player.stats.health}`);
+  
+  // Verifica se o jogador morreu
+  if (player.stats.health <= 0) {
+    handlePlayerDeath(player.id, monster.id, ioInstance, true);
+  }
+}
+
+// Função para jogador atacar monstro
+function playerAttackMonster(playerId, monsterId, attackDamage) {
+  // Verifica se o monstro existe
+  if (!monsters[monsterId]) return false;
+  
+  const monster = monsters[monsterId];
+  
+  // Ignora se o monstro já está morto
+  if (monster.currentState === 'dead') return false;
+  
+  // Aplica dano
+  monster.stats.health -= attackDamage;
+  
+  // Notifica clientes
+  ioInstance.emit('monsterDamaged', {
+    id: monster.id,
+    health: monster.stats.health,
+    maxHealth: monster.stats.maxHealth,
+    attackerId: playerId,
+    damage: attackDamage
+  });
+  
+  // Se estiver em idle, altera para chase
+  if (monster.currentState === 'idle') {
+    monster.targetId = playerId;
+    monster.currentState = 'chase';
+  }
+  
+  // Verifica se o monstro morreu
+  if (monster.stats.health <= 0) {
+    handleMonsterDeath(monster, playerId);
+    return true;
+  }
+  
+  return false;
+}
+
+// Função para lidar com a morte de um monstro
+function handleMonsterDeath(monster, killerId) {
+  monster.stats.health = 0;
+  monster.currentState = 'dead';
+  
+  // Notifica os clientes
+  ioInstance.emit('monsterDead', {
+    id: monster.id,
+    killerId: killerId,
+    position: monster.position, // Adiciona a posição para melhor tracking
+    type: monster.type         // Adiciona o tipo para reações específicas
+  });
+  
+  // Concede experiência ao jogador
+  if (players[killerId]) {
+    const expGained = monster.stats.expValue;
+    players[killerId].stats.experience += expGained;
+    
+    // Verifica se o jogador subiu de nível
+    const prevLevel = players[killerId].stats.level;
+    while (players[killerId].stats.experience >= players[killerId].stats.nextLevelExp) {
+      // Dá pontos extras ao subir de nível (30 pontos)
+      const LEVEL_UP_STAT_POINTS = 30;
+      
+      // Chama a função levelUp e passa o bônus extra de pontos
+      levelUp(players[killerId], LEVEL_UP_STAT_POINTS);
+    }
+    
+    // Notifica o jogador sobre a experiência
+    ioInstance.to(killerId).emit('experienceGained', {
+      amount: expGained,
+      totalExp: players[killerId].stats.experience,
+      nextLevelExp: players[killerId].stats.nextLevelExp
+    });
+    
+    // Notifica sobre nível, se mudou
+    if (players[killerId].stats.level > prevLevel) {
+      ioInstance.to(killerId).emit('levelUp', {
+        id: killerId,
+        level: players[killerId].stats.level,
+        stats: players[killerId].stats,
+        statPoints: players[killerId].statPoints
+      });
+    }
+    
+    console.log(`Jogador ${killerId} matou ${monster.name} e ganhou ${expGained} exp!`);
+  }
+  
+  // Programa respawn
+  const respawnTime = MonsterTypes[monster.type].respawnTime * 1000;
+  monster.timers.respawn = setTimeout(() => {
+    respawnMonster(monster);
+  }, respawnTime);
+}
+
+// Função para fazer um monstro renascer
+function respawnMonster(monster) {
+  // Encontra uma posição livre para respawn
+  const respawnPosition = findRespawnPosition(monster.spawnPosition, monsters);
+  
+  // Reinicia as estatísticas
+  const monsterType = MonsterTypes[monster.type];
+  monster.stats = { ...monsterType.stats };
+  monster.position = { ...respawnPosition };
+  monster.currentState = 'idle';
+  monster.targetId = null;
+  
+  // Notifica os clientes
+  ioInstance.emit('monsterSpawned', {
+    id: monster.id,
+    type: monster.type,
+    name: monster.name,
+    position: monster.position,
+    stats: monster.stats
+  });
+  
+  console.log(`Monstro ${monster.name} (${monster.id}) reapareceu!`);
+}
+
+// Adicionar essa verificação ao manipulador de ataques de jogador
+function checkPlayerAttackHitMonsters(playerId, position, range, damage) {
+  let hitAny = false;
+  
+  for (const id in monsters) {
+    const monster = monsters[id];
+    
+    // Ignora monstros mortos
+    if (monster.currentState === 'dead') continue;
+    
+    // Calcula distância
+    const dx = monster.position.x - position.x;
+    const dz = monster.position.z - position.z;
+    const distSq = dx * dx + dz * dz;
+    
+    // Verifica se está no alcance de ataque
+    if (distSq <= range * range) {
+      playerAttackMonster(playerId, id, damage);
+      hitAny = true;
+    }
+  }
+  
+  return hitAny;
+}
+
+// Modificar a função de obtenção dos dados do jogo para incluir os monstros
+function getMonstersData() {
+  const monstersData = {};
+  
+  for (const id in monsters) {
+    const monster = monsters[id];
+    
+    // Só envia dados de monstros vivos
+    if (monster.currentState !== 'dead') {
+      monstersData[id] = {
+        id: monster.id,
+        type: monster.type,
+        name: monster.name,
+        position: monster.position,
+        rotation: monster.rotation,
+        stats: {
+          health: monster.stats.health,
+          maxHealth: monster.stats.maxHealth
+        },
+        state: monster.currentState
+      };
+    }
+  }
+  
+  return monstersData;
+}
+
+// Verifica se há colisão entre dois monstros
+function checkMonsterCollision(monster1, monster2) {
+  // Skip if either monster is dead
+  if (monster1.currentState === 'dead' || monster2.currentState === 'dead') {
+    return false;
+  }
+  
+  // Calculate distance between monsters
+  const dx = monster1.position.x - monster2.position.x;
+  const dz = monster1.position.z - monster2.position.z;
+  const distSq = dx * dx + dz * dz;
+  
+  // Define minimum distance (sum of their radii)
+  const minDist = 1.2; // Constant representing monster size
+  const minDistSq = minDist * minDist;
+  
+  // Return true if monsters are too close
+  return distSq < minDistSq;
+}
+
 function startServerLoop(io) {
+  // Armazena a instância io (embora já deva ter sido armazenada)
+  ioInstance = io;
+
   if (serverInterval) clearInterval(serverInterval);
   
   serverInterval = setInterval(() => {
-    // Envia atualizações de estado a todos os jogadores
-    io.emit('gameState', getPlayersData());
+    // Process mana and stamina regeneration for all players
+    for (const id in players) {
+      const player = players[id];
+      
+      // Regen mana
+      if (player.stats.mana < player.stats.maxMana) {
+        player.stats.mana = Math.min(
+          player.stats.maxMana, 
+          player.stats.mana + (player.stats.manaRegen / 20)
+        );
+      }
+      
+      // Regen stamina
+      if (player.stats.stamina < player.stats.maxStamina) {
+        const agilityBonus = player.stats.agility * 0.1;
+        player.stats.stamina = Math.min(
+          player.stats.maxStamina,
+          player.stats.stamina + ((player.stats.staminaRegen + agilityBonus) / 20)
+        );
+      }
+    }
+
+    // Atualiza os monstros
+    updateMonsters();
+    
+    // Send state updates to all players
+    ioInstance.emit('gameState', getPlayersData());
+    ioInstance.emit('monstersState', getMonstersData());
   }, 1000 / TICK_RATE);
 }
 

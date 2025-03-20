@@ -1,61 +1,114 @@
-// Classe para gerenciar jogadores
+// Class to manage players
 class Player {
   constructor(id, position, isLocal = false) {
     this.id = id;
-    this.health = 100;
     this.isLocal = isLocal;
+    this.mesh = null;
+    this.parts = {};
+    
+    // Stats system
+    this.stats = {
+      // Primary attributes
+      strength: 10,    // Physical damage
+      agility: 10,     // Speed and defense
+      vitality: 10,    // Health
+      energy: 10,      // Magic and mana
+      
+      // Derived stats
+      health: 100,
+      maxHealth: 100,
+      mana: 100,
+      maxMana: 100,
+      manaRegen: 2,
+      stamina: 100,    // Novo: vigor
+      maxStamina: 100, // Novo: vigor máximo
+      staminaRegen: 5, // Novo: regeneração de vigor
+      defense: 5,
+      speed: 0.15
+    };
+    
+    // Stat points available to distribute
+    this.statPoints = 20;
+    
+    // Movement and physics
+    this.isMoving = false;
+    this.moveSpeed = 0.15;
+    this.radius = 0.5;
+    this.height = 1.8;
+    this.collider = null;
+    this.lastValidPosition = new THREE.Vector3();
+
+    // Novo: flag para redução de velocidade
+    this.isExhausted = false;
+    
+    // Combat state
     this.isAttacking = false;
     this.isCastingSpell = false;
     this.attackAnimation = null;
-    this.spellCooldown = 0;
-    this.mesh = this.createPlayerMesh(isLocal);
+    this.isInvulnerable = false;
     
-    // Posiciona o jogador
-    this.mesh.position.set(position.x, position.y, position.z);
+    // Spell data
+    this.spells = {
+      fireball: {
+        manaCost: 15,
+        damage: 20,
+        cooldown: 1.5,
+        lastCast: 0,
+        range: 20,
+        speed: 0.35,
+        icon: 'fireball-icon'
+      }
+    };
     
-    // Adiciona à cena
-    scene.add(this.mesh);
+    // Chat bubble
+    this.chatBubble = null;
     
-    // Propriedades físicas do jogador
-    this.radius = 0.5; // Raio de colisão do jogador
-    this.height = 1.8; // Altura do jogador para colisões
-    
-    // Cria um collider para o jogador - usamos uma caixa mais ajustada ao corpo
-    this.updateCollider();
-    
-    // Cria um balão de chat
-    this.createChatBubble();
-    
-    // Armazena a última posição válida para caso de colisão
-    this.lastValidPosition = new THREE.Vector3(position.x, position.y, position.z);
-
-    // Constantes de ataque
-    this.MELEE_ATTACK_RANGE = 2; // Alcance do ataque corpo a corpo
-    this.MELEE_ATTACK_DAMAGE = 10; // Dano do ataque corpo a corpo
+    // Initialize player
+    this.init(position);
   }
   
-  createPlayerMesh(isLocal) {
-    // Cria a geometria do jogador (um personagem simples feito de cubos)
+  init(position) {
+    // Create mesh
+    this.createMesh(position);
+    
+    // Initialize collider
+    this.updateCollider();
+    
+    // Store initial position
+    this.lastValidPosition.copy(this.mesh.position);
+    
+    // Create chat bubble
+    this.createChatBubble();
+    
+    // Start mana regeneration if local player
+    if (this.isLocal) {
+      this.startManaRegeneration();
+      this.startStaminaRegeneration();
+    }
+  }
+  
+  createMesh(position) {
+    // Create player model
     const playerGroup = new THREE.Group();
     
-    // Escolhe a cor com base no tipo de jogador (local ou remoto)
-    const bodyColor = isLocal ? 0x3498db : 0xe74c3c;
+    // Choose color based on type
+    const bodyColor = this.isLocal ? 0x3498db : 0xe74c3c;
     
-    // Corpo
+    // Body
     const bodyGeometry = new THREE.BoxGeometry(1, 1.5, 0.5);
     const bodyMaterial = new THREE.MeshLambertMaterial({ color: bodyColor });
     const bodyMesh = new THREE.Mesh(bodyGeometry, bodyMaterial);
     bodyMesh.position.y = 0.75;
     playerGroup.add(bodyMesh);
     
-    // Cabeça
+    // Head
     const headGeometry = new THREE.BoxGeometry(0.7, 0.7, 0.7);
     const headMaterial = new THREE.MeshLambertMaterial({ color: 0xecf0f1 });
     const headMesh = new THREE.Mesh(headGeometry, headMaterial);
     headMesh.position.y = 1.85;
     playerGroup.add(headMesh);
     
-    // Braços
+    // Arms
     const armGeometry = new THREE.BoxGeometry(0.3, 0.9, 0.3);
     const armMaterial = new THREE.MeshLambertMaterial({ color: bodyColor });
     
@@ -67,7 +120,7 @@ class Player {
     rightArm.position.set(0.65, 0.75, 0);
     playerGroup.add(rightArm);
     
-    // Pernas
+    // Legs
     const legGeometry = new THREE.BoxGeometry(0.3, 0.9, 0.3);
     const legMaterial = new THREE.MeshLambertMaterial({ color: 0x34495e });
     
@@ -79,7 +132,7 @@ class Player {
     rightLeg.position.set(0.25, 0, 0);
     playerGroup.add(rightLeg);
     
-    // Adiciona sombras
+    // Add shadows
     playerGroup.traverse((object) => {
       if (object.isMesh) {
         object.castShadow = true;
@@ -87,7 +140,7 @@ class Player {
       }
     });
     
-    // Armazena as partes do corpo para referência futura
+    // Store body parts for animation
     this.parts = {
       body: bodyMesh,
       head: headMesh,
@@ -95,199 +148,426 @@ class Player {
       legs: { left: leftLeg, right: rightLeg }
     };
     
-    return playerGroup;
-  }
-  
-  createChatBubble() {
-    // Cria o elemento de balão de chat
-    const chatBubble = document.createElement('div');
-    chatBubble.className = 'chat-bubble';
-    chatBubble.style.display = 'none';
-    document.body.appendChild(chatBubble);
+    // Position player
+    playerGroup.position.set(position.x, position.y, position.z);
     
-    this.chatBubble = chatBubble;
+    // Store mesh
+    this.mesh = playerGroup;
+    
+    // Add to scene
+    scene.add(playerGroup);
   }
   
-  // Atualiza a posição do collider
+  // Start mana regeneration
+  startManaRegeneration() {
+    setInterval(() => {
+      if (this.stats.mana < this.stats.maxMana) {
+        // Calculate regeneration amount based on energy
+        const energyBonus = this.stats.energy * 0.05;
+        const regenAmount = (this.stats.manaRegen + energyBonus) / 20; // Per tick (50ms)
+        
+        this.stats.mana = Math.min(this.stats.maxMana, this.stats.mana + regenAmount);
+        
+        // Update UI
+        this.updateUI();
+      }
+    }, 50);
+  }
+
+  startStaminaRegeneration() {
+    setInterval(() => {
+      if (this.stats.stamina < this.stats.maxStamina) {
+        // Regeneração baseada em agilidade
+        const agilityBonus = this.stats.agility * 0.1;
+        const regenAmount = (this.stats.staminaRegen + agilityBonus) / 10; // 10 ticks por segundo
+        
+        this.stats.stamina = Math.min(this.stats.maxStamina, this.stats.stamina + regenAmount);
+        
+        // Se o vigor voltar a um nível adequado, remove o estado de exaustão
+        if (this.isExhausted && this.stats.stamina > this.stats.maxStamina * 0.3) {
+          this.isExhausted = false;
+          this.moveSpeed = this.stats.speed; // Restaura a velocidade normal
+        }
+        
+        // Atualiza a UI
+        this.updateUI();
+      }
+    }, 100);
+  }
+  
+  // Update UI based on current stats
+  updateUI() {
+    if (!this.isLocal) return;
+    
+    // Update health bar
+    const healthFill = document.getElementById('health-fill');
+    const healthPercent = (this.stats.health / this.stats.maxHealth) * 100;
+    healthFill.style.width = `${healthPercent}%`;
+    
+    // Update mana bar
+    const manaFill = document.getElementById('mana-fill');
+    const manaPercent = (this.stats.mana / this.stats.maxMana) * 100;
+    manaFill.style.width = `${manaPercent}%`;
+    
+    // Update stamina bar
+    const staminaFill = document.getElementById('stamina-fill');
+    const staminaPercent = (this.stats.stamina / this.stats.maxStamina) * 100;
+    staminaFill.style.width = `${staminaPercent}%`;
+    
+    // Update spell icons
+    this.updateSpellIcons();
+    
+    // Update level display
+    document.getElementById('player-level').textContent = `Nível ${this.stats.level || 1}`;
+  }
+  
+  // Update spell icons based on mana and cooldown
+  updateSpellIcons() {
+    for (const spellName in this.spells) {
+      const spell = this.spells[spellName];
+      const spellIcon = document.getElementById(`spell-${spellName}`);
+      
+      if (spellIcon) {
+        // Check mana
+        const hasEnoughMana = this.stats.mana >= spell.manaCost;
+        spellIcon.classList.toggle('disabled', !hasEnoughMana);
+        
+        // Check cooldown
+        const now = Date.now();
+        const timeSinceLastCast = (now - spell.lastCast) / 1000;
+        const onCooldown = timeSinceLastCast < spell.cooldown;
+        
+        // Update cooldown indicator
+        const cooldownMask = spellIcon.querySelector('.spell-cooldown-mask');
+        if (cooldownMask) {
+          if (onCooldown) {
+            const cooldownProgress = timeSinceLastCast / spell.cooldown;
+            const rotation = 360 * cooldownProgress;
+            cooldownMask.style.display = 'block';
+            cooldownMask.style.transform = `rotate(${rotation}deg)`;
+          } else {
+            cooldownMask.style.display = 'none';
+          }
+        }
+      }
+    }
+  }
+  
+  // Update collision box
   updateCollider() {
-    // Usando uma caixa de colisão um pouco menor que o modelo visual para permitir movimento mais suave
-    const colliderWidth = 0.8; // Mais estreito que o modelo visual
-    const colliderDepth = 0.4; // Mais fino na profundidade
-    
-    // Cria uma caixa de colisão personalizada baseada na posição atual
+    const pos = this.mesh.position;
     this.collider = new THREE.Box3(
-      new THREE.Vector3(
-        this.mesh.position.x - colliderWidth/2,
-        this.mesh.position.y,
-        this.mesh.position.z - colliderDepth/2
-      ),
-      new THREE.Vector3(
-        this.mesh.position.x + colliderWidth/2,
-        this.mesh.position.y + this.height,
-        this.mesh.position.z + colliderDepth/2
-      )
+      new THREE.Vector3(pos.x - this.radius, pos.y, pos.z - this.radius),
+      new THREE.Vector3(pos.x + this.radius, pos.y + this.height, pos.z + this.radius)
     );
   }
   
-// Tenta mover para uma nova posição, respeitando colisões
-move(direction, speed, worldColliders) {
-  if (direction.length() === 0) return false;
-  
-  // Normaliza e aplica a velocidade
-  direction.normalize();
-  
-  // Implementação de sliding - tentamos mover em X e Z separadamente
-  let moved = false;
-  
-  // Salva a posição original antes de tentar mover
-  const originalX = this.mesh.position.x;
-  const originalZ = this.mesh.position.z;
-  
-  // Tenta mover em X
-  if (Math.abs(direction.x) > 0.01) {
-    const newPositionX = originalX + direction.x * speed;
-    this.mesh.position.x = newPositionX;
-    this.updateCollider();
+  // Move player
+  move(direction, speed, worldColliders) {
+    if (direction.length() === 0) return false;
     
-    // Se houver colisão, volta para a posição original em X
-    if (this.checkCollisions(worldColliders)) {
-      this.mesh.position.x = originalX;
-      this.updateCollider();
-    } else {
-      moved = true;
-    }
-  }
-  
-  // Tenta mover em Z
-  if (Math.abs(direction.z) > 0.01) {
-    const newPositionZ = originalZ + direction.z * speed;
-    this.mesh.position.z = newPositionZ;
-    this.updateCollider();
+    // Normalize direction
+    direction.normalize();
     
-    // Se houver colisão, volta para a posição original em Z
-    if (this.checkCollisions(worldColliders)) {
-      this.mesh.position.z = originalZ;
-      this.updateCollider();
-    } else {
-      moved = true;
-    }
-  }
-  
-  // Se conseguimos mover em qualquer direção, atualizamos a rotação e a última posição válida
-  if (moved) {
-    // Atualiza a rotação se estiver se movendo
-    const angle = Math.atan2(direction.x, direction.z);
-    this.mesh.rotation.y = angle;
+    // Improved sliding collision handling with special case for monsters
+    let moved = false;
+    const originalPosition = this.mesh.position.clone();
     
-    // Atualiza a última posição válida
-    this.lastValidPosition.copy(this.mesh.position);
-  } else if (this.checkCollisions(worldColliders)) {
-    // Se ainda estiver em colisão (caso raro), retornamos à última posição válida
-    // Isso impede que o jogador fique preso
-    this.mesh.position.copy(this.lastValidPosition);
-    this.updateCollider();
-  }
-  
-  return moved;
-}
-
-// Método auxiliar para verificar colisões
-checkCollisions(worldColliders) {
-  // Verifica colisão com objetos do mundo
-  for (const collider of worldColliders) {
-    if (this.collider.intersectsBox(collider)) {
-      return true;
-    }
-  }
-  
-  // Verifica colisão com outros jogadores
-  for (const id in players) {
-    if (id !== this.id) {
-      if (this.collider.intersectsBox(players[id].collider)) {
-        return true;
-      }
-    }
-  }
-  
-  return false;
-}
-
-// Método para escapar de colisões (usado em casos onde o jogador fica preso)
-escapeCollision(worldColliders) {
-  // Direções para tentar escapar
-  const escapeDirections = [
-    new THREE.Vector3(1, 0, 0),   // +X
-    new THREE.Vector3(-1, 0, 0),  // -X
-    new THREE.Vector3(0, 0, 1),   // +Z
-    new THREE.Vector3(0, 0, -1),  // -Z
-    new THREE.Vector3(1, 0, 1).normalize(),    // +X+Z
-    new THREE.Vector3(-1, 0, 1).normalize(),   // -X+Z
-    new THREE.Vector3(1, 0, -1).normalize(),   // +X-Z
-    new THREE.Vector3(-1, 0, -1).normalize()   // -X-Z
-  ];
-  
-  // Tenta cada direção para escapar
-  for (const dir of escapeDirections) {
-    const testPos = new THREE.Vector3().copy(this.mesh.position);
-    testPos.add(dir.multiplyScalar(0.5)); // Tenta mover 0.5 unidades
+    // Separate colliders into static world and dynamic entities
+    const staticColliders = [];
+    const monsterColliders = [];
     
-    // Testa colisão na nova posição
-    const tempMesh = this.mesh.clone();
-    tempMesh.position.copy(testPos);
-    
-    const tempCollider = new THREE.Box3();
-    tempCollider.setFromObject(tempMesh);
-    
-    let hasCollision = false;
-    
-    // Verifica todas as colisões
+    // Separate monster colliders from world colliders for special treatment
     for (const collider of worldColliders) {
-      if (tempCollider.intersectsBox(collider)) {
-        hasCollision = true;
-        break;
+      // Check if this is a monster collider (we can do this by checking if the monsters object
+      // has any monster with this collider)
+      let isMonsterCollider = false;
+      
+      if (window.monsters) {
+        for (const id in window.monsters) {
+          if (window.monsters[id].collider === collider) {
+            monsterColliders.push(collider);
+            isMonsterCollider = true;
+            break;
+          }
+        }
+      }
+      
+      if (!isMonsterCollider) {
+        staticColliders.push(collider);
       }
     }
     
-    for (const id in players) {
-      if (id !== this.id && !hasCollision) {
-        if (tempCollider.intersectsBox(players[id].collider)) {
-          hasCollision = true;
+    // Try moving on X axis
+    if (Math.abs(direction.x) > 0.01) {
+      const step = direction.x * speed;
+      this.mesh.position.x += step;
+      this.updateCollider();
+      
+      // First check static world collisions (always block movement)
+      let staticCollision = false;
+      for (const collider of staticColliders) {
+        if (this.collider.intersectsBox(collider)) {
+          staticCollision = true;
           break;
+        }
+      }
+      
+      if (staticCollision) {
+        // Reset position on X axis
+        this.mesh.position.x = originalPosition.x;
+        this.updateCollider();
+      } else {
+        // Check monster collisions with sliding possibility
+        let monsterCollision = false;
+        for (const collider of monsterColliders) {
+          if (this.collider.intersectsBox(collider)) {
+            monsterCollision = true;
+            
+            // Try to slide around the monster slightly (on Z)
+            // This helps prevent getting stuck on monsters
+            const slideDirection = (Math.random() > 0.5) ? 0.5 : -0.5;
+            this.mesh.position.z += slideDirection * speed * 0.5;
+            this.updateCollider();
+            
+            // If still colliding, revert Z position too
+            if (this.collider.intersectsBox(collider)) {
+              this.mesh.position.z = originalPosition.z;
+              this.updateCollider();
+            }
+            
+            break;
+          }
+        }
+        
+        if (!monsterCollision) {
+          moved = true;
+        } else {
+          // Revert X position
+          this.mesh.position.x = originalPosition.x;
+          this.updateCollider();
         }
       }
     }
     
-    // Se não tiver colisão, move para essa posição
-    if (!hasCollision) {
-      this.mesh.position.copy(testPos);
+    // Try moving on Z axis
+    if (Math.abs(direction.z) > 0.01) {
+      const step = direction.z * speed;
+      this.mesh.position.z += step;
       this.updateCollider();
-      this.lastValidPosition.copy(testPos);
-      return true;
+      
+      // First check static world collisions
+      let staticCollision = false;
+      for (const collider of staticColliders) {
+        if (this.collider.intersectsBox(collider)) {
+          staticCollision = true;
+          break;
+        }
+      }
+      
+      if (staticCollision) {
+        // Reset position on Z axis
+        this.mesh.position.z = originalPosition.z;
+        this.updateCollider();
+      } else {
+        // Check monster collisions with sliding possibility
+        let monsterCollision = false;
+        for (const collider of monsterColliders) {
+          if (this.collider.intersectsBox(collider)) {
+            monsterCollision = true;
+            
+            // Try to slide around the monster slightly (on X)
+            const slideDirection = (Math.random() > 0.5) ? 0.5 : -0.5;
+            this.mesh.position.x += slideDirection * speed * 0.5;
+            this.updateCollider();
+            
+            // If still colliding, revert X position too
+            if (this.collider.intersectsBox(collider)) {
+              this.mesh.position.x = originalPosition.x;
+              this.updateCollider();
+            }
+            
+            break;
+          }
+        }
+        
+        if (!monsterCollision) {
+          moved = true;
+        } else {
+          // Revert Z position
+          this.mesh.position.z = originalPosition.z;
+          this.updateCollider();
+        }
+      }
+    }
+    
+    // If we moved, update the rotation and position
+    if (moved) {
+      // Update rotation to face movement direction
+      const angle = Math.atan2(direction.x, direction.z);
+      this.mesh.rotation.y = angle;
+      
+      // Update the last valid position
+      this.lastValidPosition.copy(this.mesh.position);
+      
+      // Animate walking
+      this.animateWalk();
+    } else if (this.checkCollisions(worldColliders)) {
+      // If still stuck, try emergency escape
+      this.escapeCollision(worldColliders);
+    }
+    
+    return moved;
+  }
+  
+  // Animate walking
+  animateWalk() {
+    const now = Date.now();
+    
+    // Only update animation every 50ms
+    if (!this.lastWalkTime || now - this.lastWalkTime > 50) {
+      this.walkCycle = (this.walkCycle || 0) + 1;
+      
+      // Simple leg animation
+      const leftLeg = this.parts.legs.left;
+      const rightLeg = this.parts.legs.right;
+      
+      // Alternate legs
+      const cycle = Math.sin(this.walkCycle * 0.4) * 0.2;
+      leftLeg.rotation.x = cycle;
+      rightLeg.rotation.x = -cycle;
+      
+      this.lastWalkTime = now;
     }
   }
   
-  return false;
-}
+  // Check for collisions
+  checkCollisions(worldColliders) {
+    // Verifica colisão com objetos do mundo
+    for (const collider of worldColliders) {
+      if (this.collider.intersectsBox(collider)) {
+        return true;
+      }
+    }
+    
+    // Verifica colisão com outros jogadores
+    for (const id in players) {
+      if (id !== this.id) {
+        if (this.collider.intersectsBox(players[id].collider)) {
+          return true;
+        }
+      }
+    }
+    
+    // Verifica colisão com monstros
+    if (typeof monsters !== 'undefined') {
+      for (const id in monsters) {
+        const monster = monsters[id];
+        if (monster.collider && this.collider.intersectsBox(monster.collider)) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  }
   
-  // Executa um ataque corpo a corpo
+  // Try to escape collision
+  escapeCollision(worldColliders) {
+    // Directions to try
+    const escapeDirections = [
+      new THREE.Vector3(1, 0, 0),   // +X
+      new THREE.Vector3(-1, 0, 0),  // -X
+      new THREE.Vector3(0, 0, 1),   // +Z
+      new THREE.Vector3(0, 0, -1),  // -Z
+      new THREE.Vector3(1, 0, 1).normalize(),    // +X+Z
+      new THREE.Vector3(-1, 0, 1).normalize(),   // -X+Z
+      new THREE.Vector3(1, 0, -1).normalize(),   // +X-Z
+      new THREE.Vector3(-1, 0, -1).normalize()   // -X-Z
+    ];
+    
+    // Try each direction
+    for (const dir of escapeDirections) {
+      const testPosition = this.mesh.position.clone().add(dir.clone().multiplyScalar(0.5));
+      
+      // Create test collider
+      const testCollider = new THREE.Box3(
+        new THREE.Vector3(testPosition.x - this.radius, testPosition.y, testPosition.z - this.radius),
+        new THREE.Vector3(testPosition.x + this.radius, testPosition.y + this.height, testPosition.z + this.radius)
+      );
+      
+      // Check for collisions
+      let hasCollision = false;
+      
+      // World collisions
+      for (const collider of worldColliders) {
+        if (testCollider.intersectsBox(collider)) {
+          hasCollision = true;
+          break;
+        }
+      }
+      
+      // Player collisions
+      if (!hasCollision) {
+        for (const id in players) {
+          if (id !== this.id && testCollider.intersectsBox(players[id].collider)) {
+            hasCollision = true;
+            break;
+          }
+        }
+      }
+      
+      // Move to position if no collision
+      if (!hasCollision) {
+        this.mesh.position.copy(testPosition);
+        this.updateCollider();
+        this.lastValidPosition.copy(testPosition);
+        return true;
+      }
+    }
+    
+    return false;
+  }
+  
+  // Perform melee attack
   attack(targetPosition = null) {
     if (this.isAttacking) return;
+
+    // Verifica se tem vigor suficiente
+    const STAMINA_COST = 10;
+    if (this.stats.stamina < STAMINA_COST) {
+      if (this.isLocal) {
+        addSystemMessage("Vigor insuficiente para atacar!");
+      }
+      return false;
+    }
+    
+    // Consome vigor
+    this.stats.stamina -= STAMINA_COST;
+    
+    // Verifica exaustão
+    this.checkExhaustion();
+    
+    // Atualiza UI se for jogador local
+    if (this.isLocal) {
+      this.updateUI();
+    }
     
     this.isAttacking = true;
     
-    // Se temos uma posição alvo, rotaciona o jogador para ela
+    // Rotate to face target
     if (targetPosition && this.isLocal) {
-      // Calcula o ângulo para o alvo
+      // Calculate angle to target
       const direction = new THREE.Vector2(
         targetPosition.x - this.mesh.position.x,
         targetPosition.z - this.mesh.position.z
       ).normalize();
       
-      // Atualiza a rotação do jogador
+      // Update rotation
       const targetAngle = Math.atan2(direction.x, direction.y);
       this.mesh.rotation.y = targetAngle;
       
-      // Envia a atualização de rotação para o servidor
+      // Send update to server
       sendPlayerMove({
         position: {
           x: this.mesh.position.x,
@@ -300,11 +580,10 @@ escapeCollision(worldColliders) {
       });
     }
     
-    // Animação de ataque (move o braço direito)
+    // Animate attack
     const rightArm = this.parts.arms.right;
     const originalRotation = rightArm.rotation.x;
     
-    // Animação simples do braço
     const startAttack = Date.now();
     const attackDuration = 300; // ms
     
@@ -317,10 +596,10 @@ escapeCollision(worldColliders) {
       const progress = Math.min(elapsed / attackDuration, 1);
       
       if (progress < 0.5) {
-        // Movimento para frente
+        // Forward swing
         rightArm.rotation.x = originalRotation - (Math.PI * 0.8) * (progress * 2);
       } else {
-        // Movimento para trás
+        // Return swing
         rightArm.rotation.x = originalRotation - (Math.PI * 0.8) * (2 - progress * 2);
       }
       
@@ -334,55 +613,107 @@ escapeCollision(worldColliders) {
     
     this.attackAnimation = requestAnimationFrame(animateAttack);
     
-    // Para jogador local, verificamos alvos e mostramos dano
+    // Check for hits
     if (this.isLocal) {
-      // Verificar jogadores próximos para acertar com o ataque
       this.checkMeleeAttackHits();
     }
   }
   
-
-  // Verifica se o ataque corpo a corpo atingiu algum jogador (apenas no cliente para feedback imediato)
+  // Check for melee attack hits
   checkMeleeAttackHits() {
-    // Verificamos todos os outros jogadores
+    const MELEE_ATTACK_RANGE = 2;
+    
+    // Check other players
     for (const id in players) {
-      if (id === this.id) continue; // Pula o próprio jogador
+      if (id === this.id) continue;
       
       const target = players[id];
       const dx = target.mesh.position.x - this.mesh.position.x;
       const dz = target.mesh.position.z - this.mesh.position.z;
       const distSq = dx * dx + dz * dz;
       
-      // Verificamos o alcance do ataque corpo a corpo
-      if (distSq <= this.MELEE_ATTACK_RANGE * this.MELEE_ATTACK_RANGE) {
-        // Mostra efeito de dano no cliente para feedback imediato
+      // If in range, hit target
+      if (distSq <= MELEE_ATTACK_RANGE * MELEE_ATTACK_RANGE) {
+        // Calculate damage based on strength
+        const BASE_DAMAGE = 5;
+        const strengthBonus = this.stats.strength * 0.5;
+        const damage = Math.floor(BASE_DAMAGE + strengthBonus);
+        
+        // Visual feedback
         target.showDamageEffect();
         
-        // Mostra número de dano flutuante
-        showDamageNumber(target.mesh.position, this.MELEE_ATTACK_DAMAGE);
+        // Show damage number
+        showDamageNumber(target.mesh.position, damage);
       }
     }
   }
 
-  // Conjura uma magia de ataque
+  checkExhaustion() {
+    // Se o vigor cair abaixo de 20%, o personagem fica exausto
+    if (this.stats.stamina < this.stats.maxStamina * 0.2) {
+      this.isExhausted = true;
+      // Reduz velocidade em 30%
+      this.moveSpeed = this.stats.speed * 0.7;
+      
+      if (this.isLocal) {
+        addSystemMessage("Você está exausto e se movendo mais devagar!");
+      }
+    }
+  }
+  
+  // Cast a spell
   castSpell(targetPosition) {
-    if (this.isCastingSpell || this.spellCooldown > 0) return false;
+    const spell = this.spells.fireball;
     
-    this.isCastingSpell = true;
+    // Check cooldown
+    const now = Date.now();
+    const timeSinceLastCast = (now - spell.lastCast) / 1000;
+    if (timeSinceLastCast < spell.cooldown) {
+      return false;
+    }
     
-    // Rotaciona o jogador para olhar para o alvo
+    // Check mana
+    if (this.stats.mana < spell.manaCost) {
+      if (this.isLocal) {
+        addSystemMessage("Mana insuficiente!");
+      }
+      return false;
+    }
+
+    // Verifica vigor
+    const STAMINA_COST = 5;
+    if (this.stats.stamina < STAMINA_COST) {
+      if (this.isLocal) {
+        addSystemMessage("Vigor insuficiente para lançar magia!");
+      }
+      return false;
+    }
+    
+    // Consume recursos
+    this.stats.mana -= spell.manaCost;
+    this.stats.stamina -= STAMINA_COST;
+
+    // Verifica exaustão
+    this.checkExhaustion();
+
     if (this.isLocal) {
-      // Calcula o ângulo para o alvo
+      this.updateUI();
+    }
+    
+    // Update cooldown
+    spell.lastCast = now;
+    
+    // Rotate to face target
+    if (this.isLocal) {
       const direction = new THREE.Vector2(
         targetPosition.x - this.mesh.position.x,
         targetPosition.z - this.mesh.position.z
       ).normalize();
       
-      // Atualiza a rotação do jogador
       const targetAngle = Math.atan2(direction.x, direction.y);
       this.mesh.rotation.y = targetAngle;
       
-      // Envia a atualização de rotação para o servidor
+      // Send update
       sendPlayerMove({
         position: {
           x: this.mesh.position.x,
@@ -395,18 +726,17 @@ escapeCollision(worldColliders) {
       });
     }
     
-    // Obtém direção para o alvo
+    // Get direction to target
     const direction = new THREE.Vector3();
     direction.subVectors(targetPosition, this.mesh.position).normalize();
     
-    // Cria a bola de magia
+    // Create fireball
     const fireball = createFireball(this.mesh.position, direction, this.id);
     
-    // Anima o braço esquerdo para o gesto de magia
+    // Casting animation
     const leftArm = this.parts.arms.left;
     const originalRotation = leftArm.rotation.x;
     
-    // Animação simples do braço
     const startCast = Date.now();
     const castDuration = 500; // ms
     
@@ -415,13 +745,13 @@ escapeCollision(worldColliders) {
       const progress = Math.min(elapsed / castDuration, 1);
       
       if (progress < 0.3) {
-        // Movimento para cima
+        // Raise arm
         leftArm.rotation.x = originalRotation - (Math.PI * 0.5) * (progress / 0.3);
       } else if (progress < 0.7) {
-        // Mantém posição
+        // Hold
         leftArm.rotation.x = originalRotation - (Math.PI * 0.5);
       } else {
-        // Movimento para baixo
+        // Lower arm
         leftArm.rotation.x = originalRotation - (Math.PI * 0.5) * (1 - ((progress - 0.7) / 0.3));
       }
       
@@ -429,16 +759,6 @@ escapeCollision(worldColliders) {
         requestAnimationFrame(animateCast);
       } else {
         leftArm.rotation.x = originalRotation;
-        this.isCastingSpell = false;
-        
-        // Adiciona cooldown
-        this.spellCooldown = 3; // 3 segundos
-        const cooldownInterval = setInterval(() => {
-          this.spellCooldown -= 1;
-          if (this.spellCooldown <= 0) {
-            clearInterval(cooldownInterval);
-          }
-        }, 1000);
       }
     };
     
@@ -446,25 +766,35 @@ escapeCollision(worldColliders) {
     return true;
   }
   
-  // Mostra um balão de chat
+  // Create chat bubble
+  createChatBubble() {
+    const chatBubble = document.createElement('div');
+    chatBubble.className = 'chat-bubble';
+    chatBubble.style.display = 'none';
+    document.body.appendChild(chatBubble);
+    
+    this.chatBubble = chatBubble;
+  }
+  
+  // Show chat bubble with message
   showChatBubble(message) {
     this.chatBubble.textContent = message;
     this.chatBubble.style.display = 'block';
     
-    // Esconde o balão após 5 segundos
+    // Hide after 5 seconds
     setTimeout(() => {
       this.chatBubble.style.display = 'none';
     }, 5000);
   }
   
-  // Atualiza a posição do balão de chat
+  // Update chat bubble position
   updateChatBubblePosition(camera) {
     if (!this.chatBubble) return;
     
-    // Converte a posição 3D para coordenadas de tela
+    // Project 3D position to screen coordinates
     const position = new THREE.Vector3();
     position.copy(this.mesh.position);
-    position.y += 3; // Acima da cabeça
+    position.y += 3;
     
     const screenPosition = position.clone();
     screenPosition.project(camera);
@@ -476,7 +806,7 @@ escapeCollision(worldColliders) {
     this.chatBubble.style.top = `${y}px`;
   }
   
- // Mostra efeito de dano
+  // Show damage effect
   showDamageEffect() {
     const originalColor = this.isLocal ? 0x3498db : 0xe74c3c;
     const damagedColor = 0xff0000;
@@ -485,7 +815,7 @@ escapeCollision(worldColliders) {
     this.parts.arms.left.material.color.setHex(damagedColor);
     this.parts.arms.right.material.color.setHex(damagedColor);
     
-    // Retorna à cor original após 200ms
+    // Return to original color after 200ms
     setTimeout(() => {
       this.parts.body.material.color.setHex(originalColor);
       this.parts.arms.left.material.color.setHex(originalColor);
@@ -493,9 +823,8 @@ escapeCollision(worldColliders) {
     }, 200);
   }
   
-  // Mostra morte do jogador
+  // Die animation
   die() {
-    // Animação simples de morte (faz o jogador cair)
     const deathAnimation = () => {
       this.mesh.rotation.z += 0.05;
       
@@ -509,15 +838,20 @@ escapeCollision(worldColliders) {
     requestAnimationFrame(deathAnimation);
   }
   
-  // Respawn do jogador
+  // Respawn player
   respawn(position) {
     this.mesh.position.set(position.x, position.y, position.z);
     this.mesh.rotation.set(0, 0, 0);
-    this.health = 100;
+    this.stats.health = this.stats.maxHealth;
+    this.stats.mana = this.stats.maxMana;
     this.updateCollider();
+    
+    if (this.isLocal) {
+      this.updateUI();
+    }
   }
   
-  // Limpa os recursos ao remover o jogador
+  // Clean up resources
   destroy() {
     if (this.chatBubble) {
       document.body.removeChild(this.chatBubble);
@@ -529,16 +863,44 @@ escapeCollision(worldColliders) {
     
     scene.remove(this.mesh);
   }
+  
+  // Take damage
+  takeDamage(amount) {
+    if (this.isInvulnerable) return false;
+    
+    // Apply defense reduction
+    const defenseReduction = this.stats.defense / (this.stats.defense + 50);
+    const reducedDamage = Math.max(1, Math.floor(amount * (1 - defenseReduction)));
+    
+    // Apply damage
+    this.stats.health -= reducedDamage;
+    
+    // Cap at 0
+    if (this.stats.health < 0) {
+      this.stats.health = 0;
+    }
+    
+    // Update UI
+    if (this.isLocal) {
+      this.updateUI();
+    }
+    
+    // Show damage effect
+    this.showDamageEffect();
+    
+    // Return true if killed
+    return this.stats.health <= 0;
+  }
 }
 
-// Função para criar/obter jogadores
+// Create a new player
 function createPlayer(id, position, isLocal = false) {
   const player = new Player(id, position, isLocal);
   players[id] = player;
   return player;
 }
 
-// Remove um jogador
+// Remove a player
 function removePlayer(id) {
   if (players[id]) {
     players[id].destroy();
@@ -546,37 +908,32 @@ function removePlayer(id) {
   }
 }
 
-// Função para criar números de dano flutuantes
+// Show floating damage number
 function showDamageNumber(position, amount) {
-  // Cria elemento HTML para o número de dano
   const damageElement = document.createElement('div');
   damageElement.className = 'damage-number';
   damageElement.textContent = amount;
   document.body.appendChild(damageElement);
   
-  // Posiciona o elemento no mundo 3D
+  // Position in 3D world
   const updatePosition = () => {
-    // Projeta a posição 3D para coordenadas 2D da tela
     const screenPosition = new THREE.Vector3(
       position.x,
-      position.y + 2, // Acima da cabeça
+      position.y + 2,
       position.z
     );
     screenPosition.project(camera);
     
-    // Converte para coordenadas CSS
     const x = (screenPosition.x * 0.5 + 0.5) * window.innerWidth;
     const y = (-screenPosition.y * 0.5 + 0.5) * window.innerHeight;
     
-    // Atualiza posição do elemento
     damageElement.style.left = `${x}px`;
     damageElement.style.top = `${y}px`;
   };
   
-  // Posição inicial
   updatePosition();
   
-  // Animação do número subindo
+  // Animate
   let animationFrame;
   const startTime = Date.now();
   const duration = 1500; // ms
@@ -585,17 +942,14 @@ function showDamageNumber(position, amount) {
     const elapsed = Date.now() - startTime;
     const progress = Math.min(elapsed / duration, 1);
     
-    // Atualiza posição do dano
     updatePosition();
     
-    // Fade out e movimento para cima
     damageElement.style.opacity = 1 - progress;
     damageElement.style.transform = `translateY(-${progress * 50}px)`;
     
     if (progress < 1) {
       animationFrame = requestAnimationFrame(animate);
     } else {
-      // Remove o elemento quando a animação terminar
       document.body.removeChild(damageElement);
       cancelAnimationFrame(animationFrame);
     }
@@ -604,15 +958,22 @@ function showDamageNumber(position, amount) {
   animationFrame = requestAnimationFrame(animate);
 }
 
-// Função para criar uma bola de fogo
+// Create fireball projectile
 function createFireball(startPosition, direction, casterId) {
-  // Constantes da magia
-  const FIREBALL_SPEED = 0.35; // Ligeiramente mais rápido
-  const FIREBALL_RANGE = 20;  // Aumentado o alcance
-  const FIREBALL_DAMAGE = 20;
+  // Spell constants
+  const FIREBALL_SPEED = 0.35;
+  const FIREBALL_RANGE = 20;
   const FIREBALL_RADIUS = 0.3;
   
-  // Cria geometria da bola de fogo
+  // Get caster for damage calculation
+  const caster = players[casterId];
+  
+  // Calculate damage based on energy
+  const BASE_DAMAGE = 15;
+  const energyBonus = caster ? caster.stats.energy * 0.8 : 0;
+  const FIREBALL_DAMAGE = Math.floor(BASE_DAMAGE + energyBonus);
+  
+  // Create fireball geometry
   const geometry = new THREE.SphereGeometry(FIREBALL_RADIUS, 8, 8);
   const material = new THREE.MeshPhongMaterial({
     color: 0xff5500,
@@ -623,20 +984,20 @@ function createFireball(startPosition, direction, casterId) {
   
   const fireball = new THREE.Mesh(geometry, material);
   
-  // Posiciona a bola de fogo na frente do jogador, mas um pouco acima
+  // Position in front of caster
   const offset = new THREE.Vector3(direction.x, 0, direction.z).multiplyScalar(1);
   fireball.position.copy(startPosition).add(offset);
-  fireball.position.y = 1.5; // Altura da bola de fogo
+  fireball.position.y = 1.5;
   
-  // Adiciona à cena
+  // Add to scene
   scene.add(fireball);
   
-  // Adiciona luz pontual para efeito de iluminação
+  // Add light
   const light = new THREE.PointLight(0xff5500, 1, 5);
   light.position.copy(fireball.position);
   scene.add(light);
   
-  // Dados da bola de fogo
+  // Fireball data
   const fireballData = {
     mesh: fireball,
     light: light,
@@ -647,7 +1008,7 @@ function createFireball(startPosition, direction, casterId) {
     damage: FIREBALL_DAMAGE,
     
     update: function() {
-      // Move a bola de fogo
+      // Move fireball
       const moveVector = new THREE.Vector3(
         this.direction.x * FIREBALL_SPEED,
         0,
@@ -657,43 +1018,86 @@ function createFireball(startPosition, direction, casterId) {
       this.mesh.position.add(moveVector);
       this.light.position.copy(this.mesh.position);
       
-      // Atualiza distância percorrida
+      // Update distance
       this.distance += moveVector.length();
       
-      // Verifica colisão com objetos do mundo
+      // Check world collision
       const raycaster = new THREE.Raycaster(
         this.mesh.position,
         this.direction,
         0,
-        FIREBALL_SPEED * 2 // Aumentado para detecção mais precisa
+        FIREBALL_SPEED * 2
       );
       
       const worldObjects = gameWorld.objects || [];
       const intersects = raycaster.intersectObjects(worldObjects, true);
       
       if (intersects.length > 0 && intersects[0].distance < FIREBALL_SPEED * 2) {
-        // Colisão com objeto do mundo
         this.explode();
         return false;
       }
       
-      // Verifica colisão com jogadores
+      // -------- INÍCIO DA CORREÇÃO PARA MELHORAR DETECÇÃO DE MONSTROS --------
+      
+      // Check collision with monsters first (separate from players for better control)
+      if (window.monsters) {
+        for (const id in window.monsters) {
+          const monster = window.monsters[id];
+          
+          // Skip if monster doesn't have a mesh
+          if (!monster.mesh) continue;
+          
+          // Calculate a more generous collision check for monsters
+          const dx = monster.mesh.position.x - this.mesh.position.x;
+          const dy = monster.mesh.position.y + 1 - this.mesh.position.y; // More forgiving height check
+          const dz = monster.mesh.position.z - this.mesh.position.z;
+          
+          const distSq = dx * dx + dy * dy + dz * dz;
+          
+          // Use a much more generous hit radius for monsters (5x larger)
+          // This makes it easier to hit monsters with fireballs
+          const hitRadiusSq = (monster.radius || 0.8 + FIREBALL_RADIUS) * 
+                             (monster.radius || 0.8 + FIREBALL_RADIUS) * 5;
+          
+          if (distSq < hitRadiusSq) {
+            // Hit monster
+            if (monster.showDamageEffect) {
+              monster.showDamageEffect();
+            }
+            
+            showDamageNumber(monster.mesh.position, this.damage);
+            
+            // Notify server
+            if (playerId === this.casterId) {
+              // Envia informação específica de hit em monstro
+              sendSpellHitMonster(id, this.damage);
+            }
+            
+            this.explode();
+            return false;
+          }
+        }
+      }
+      
+      // -------- FIM DA CORREÇÃO --------
+      
+      // Check player collision (existing code)
       for (const id in players) {
-        if (id === this.casterId) continue; // Ignora o lançador
+        if (id === this.casterId) continue;
         
         const player = players[id];
         const dx = player.mesh.position.x - this.mesh.position.x;
-        const dy = player.mesh.position.y + 1 - this.mesh.position.y; // Altura média
+        const dy = player.mesh.position.y + 1 - this.mesh.position.y;
         const dz = player.mesh.position.z - this.mesh.position.z;
         
         const distSq = dx * dx + dy * dy + dz * dz;
         
-        if (distSq < (player.radius + FIREBALL_RADIUS) * (player.radius + FIREBALL_RADIUS) * 4) { // Aumentado para melhor detecção
-          // Colisão com jogador
+        if (distSq < (player.radius + FIREBALL_RADIUS) * (player.radius + FIREBALL_RADIUS) * 4) {
+          // Hit player
           player.showDamageEffect();
           showDamageNumber(player.mesh.position, this.damage);
           
-          // Notificar servidor do acerto
+          // Notify server
           if (playerId === this.casterId) {
             sendSpellHit(id, this.damage);
           }
@@ -703,7 +1107,7 @@ function createFireball(startPosition, direction, casterId) {
         }
       }
       
-      // Verifica se atingiu o alcance máximo
+      // Check max range
       if (this.distance >= this.maxDistance) {
         this.remove();
         return false;
@@ -713,7 +1117,7 @@ function createFireball(startPosition, direction, casterId) {
     },
     
     explode: function() {
-      // Efeito de explosão
+      // Create explosion
       const explosionGeometry = new THREE.SphereGeometry(1, 12, 12);
       const explosionMaterial = new THREE.MeshBasicMaterial({
         color: 0xff7700,
@@ -725,7 +1129,7 @@ function createFireball(startPosition, direction, casterId) {
       explosion.position.copy(this.mesh.position);
       scene.add(explosion);
       
-      // Animação de explosão
+      // Animate explosion
       const startTime = Date.now();
       const duration = 500; // ms
       
@@ -733,7 +1137,6 @@ function createFireball(startPosition, direction, casterId) {
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / duration, 1);
         
-        // Expande e desaparece
         explosion.scale.set(1 + progress, 1 + progress, 1 + progress);
         explosionMaterial.opacity = 0.7 * (1 - progress);
         
@@ -746,18 +1149,17 @@ function createFireball(startPosition, direction, casterId) {
       
       requestAnimationFrame(animateExplosion);
       
-      // Remove a bola de fogo
+      // Remove fireball
       this.remove();
     },
     
     remove: function() {
-      // Remove elementos da cena
       scene.remove(this.mesh);
       scene.remove(this.light);
     }
   };
   
-  // Adiciona à lista de projéteis
+  // Add to projectiles
   projectiles.push(fireballData);
   
   return fireballData;

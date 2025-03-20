@@ -1,246 +1,454 @@
-// Variáveis do jogo
+// Core game variables
 let scene, camera, renderer;
 let localPlayer, players = {};
 let gameStarted = false;
-let projectiles = []; // Lista de projéteis (bolas de fogo, etc)
-let worldMousePosition = new THREE.Vector3(); // Posição atual do mouse no mundo 3D
-let raycaster = new THREE.Raycaster(); // Raycaster para selecionar alvo
+let projectiles = [];
+let worldMousePosition = new THREE.Vector3();
+let raycaster = new THREE.Raycaster();
+let selectedTarget = null; // Currently selected target
+let targetIndicator; // Visual indicator for selected target
 
-// Inicializa o jogo
+// Initialize the game
 function init() {
-  // Inicializa o Three.js
+  // Initialize Three.js
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x87CEEB); // Céu azul claro
+  scene.background = new THREE.Color(0x87CEEB); // Light blue sky
   
-  // Configuração da câmera
+  // Camera setup
   camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
   camera.position.set(0, 5, 10);
   camera.lookAt(0, 0, 0);
   
-  // Configuração do renderizador
-  renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('game-canvas'), antialias: true });
+  // Renderer setup
+  renderer = new THREE.WebGLRenderer({ 
+    canvas: document.getElementById('game-canvas'), 
+    antialias: true 
+  });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
   
-  // Inicializa o mundo
+  // Initialize subsystems
   initWorld();
-  
-  // Inicializa o sistema de entrada
   initInputSystem();
-  
-  // Inicializa o sistema de chat
   initChatSystem();
-
-  // Inicializa o sistema de HUD
-  initHUD();
+  initUI();
+  initTargetIndicator();
   
-  // Inicializa a rede
+  // Create experience bar
+  createExpBar();
+  
+  // Initialize networking
   initNetworking(() => {
-    // Callback após a conexão ser estabelecida
+    // Callback after connection established
     hideLoadingScreen();
     gameStarted = true;
     animate();
   });
   
-  // Event listener para redimensionamento da janela
+  // Event listeners
   window.addEventListener('resize', onWindowResize);
-  
-  // Event listener para clique do mouse (magia)
   document.addEventListener('click', onMouseClick);
-  
-  // Event listener para rastreamento de posição do mouse no mundo 3D
   document.addEventListener('mousemove', onMouseMoveWorld);
+  document.addEventListener('keydown', handleKeydown);
+  
+  // Add stats toggle listener
+  const toggleStatsButton = document.getElementById('toggle-stats');
+  if (toggleStatsButton) {
+    toggleStatsButton.addEventListener('click', () => {
+      const statsPanel = document.getElementById('stats-panel');
+      if (statsPanel) {
+        statsPanel.classList.toggle('visible');
+      }
+    });
+  }
 }
 
-// Rastreia a posição do mouse no mundo 3D para sistema de mira
+// Create experience bar
+function createExpBar() {
+  // Create experience bar if not exists
+  if (!document.getElementById('exp-bar')) {
+    const expBar = document.createElement('div');
+    expBar.id = 'exp-bar';
+    
+    const expFill = document.createElement('div');
+    expFill.id = 'exp-fill';
+    
+    expBar.appendChild(expFill);
+    document.body.appendChild(expBar);
+  }
+}
+
+// Update experience bar
+function updateExpBar() {
+  if (!localPlayer || !localPlayer.stats) return;
+  
+  const expFill = document.getElementById('exp-fill');
+  if (!expFill) return;
+  
+  const expPercentage = (localPlayer.stats.experience / localPlayer.stats.nextLevelExp) * 100;
+  expFill.style.width = `${expPercentage}%`;
+}
+
+// Initialize the target selection indicator
+function initTargetIndicator() {
+  targetIndicator = document.getElementById('target-indicator');
+}
+
+// Track mouse position in world
 function onMouseMoveWorld(event) {
-  // Ignora se o jogo não iniciou
   if (!gameStarted || !localPlayer) return;
   
-  // Se o mouse estiver sobre o chat, ignora
+  // Ignore if mouse is over chat input
   if (document.activeElement === document.getElementById('chat-input')) return;
   
-  // Converte coordenadas do mouse para coordenadas normalizadas (-1 a 1)
+  // Convert mouse coordinates to normalized device coordinates
   const mouse = new THREE.Vector2();
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
   
-  // Atualiza o raycaster
+  // Update raycaster
   raycaster.setFromCamera(mouse, camera);
   
-  // Encontra interseção com o plano do chão
-  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  raycaster.ray.intersectPlane(groundPlane, worldMousePosition);
-}
-
-// Inicializa o HUD do jogo
-function initHUD() {
-  // Criação do UI para cooldown de magia
-  const spellHUD = document.createElement('div');
-  spellHUD.id = 'spell-hud';
-  document.getElementById('ui-container').appendChild(spellHUD);
+  // Primeiro verifica se há monstros sob o cursor
+  const monsterMeshes = [];
+  const monsterIds = [];
   
-  // Ícone da magia
-  const spellIcon = document.createElement('div');
-  spellIcon.id = 'spell-icon';
-  spellHUD.appendChild(spellIcon);
-  
-  // Cooldown da magia
-  const spellCooldown = document.createElement('div');
-  spellCooldown.id = 'spell-cooldown';
-  spellHUD.appendChild(spellCooldown);
-}
-
-// Gerencia o clique do mouse para ataques e magias
-function onMouseClick(event) {
-  // Ignora cliques no chat ou quando o jogo não está iniciado
-  if (!gameStarted || !localPlayer || document.activeElement === document.getElementById('chat-input')) {
-    return;
+  for (const id in monsters) {
+    if (monsters[id].mesh) {
+      monsterMeshes.push(monsters[id].mesh);
+      monsterIds.push(id);
+      
+      // Adiciona também todas as partes do monstro para melhorar a detecção
+      if (monsters[id].parts) {
+        if (monsters[id].parts.body) {
+          monsterMeshes.push(monsters[id].parts.body);
+          monsterIds.push(id);
+        }
+        if (monsters[id].parts.head) {
+          monsterMeshes.push(monsters[id].parts.head);
+          monsterIds.push(id);
+        }
+        if (monsters[id].parts.legs) {
+          if (monsters[id].parts.legs.left) {
+            monsterMeshes.push(monsters[id].parts.legs.left);
+            monsterIds.push(id);
+          }
+          if (monsters[id].parts.legs.right) {
+            monsterMeshes.push(monsters[id].parts.legs.right);
+            monsterIds.push(id);
+          }
+        }
+      }
+    }
   }
   
-  // Lógica para botão esquerdo (Magia)
-  if (event.button === 0) {
-    // Primeiro verificamos se há um jogador sob o cursor
-    let targetPlayer = null;
-    let closestDistance = Infinity;
+  let intersects = raycaster.intersectObjects(monsterMeshes, true);
+  
+  if (intersects.length > 0) {
+    // Encontrou um monstro sob o cursor
+    const intersectedObject = intersects[0].object;
+    let foundMonster = false;
     
-    // Converte coordenadas do mouse para coordenadas normalizadas (-1 a 1)
-    const mouse = new THREE.Vector2();
-    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-    
-    // Atualiza o raycaster
-    raycaster.setFromCamera(mouse, camera);
-    
-    // Cria um array de meshes de jogadores para verificar interseção
-    const playerMeshes = [];
-    const playerIds = [];
-    
-    for (const id in players) {
-      if (id === playerId) continue; // Ignora o próprio jogador
-      playerMeshes.push(players[id].mesh);
-      playerIds.push(id);
-    }
-    
-    // Verifica interseção com jogadores
-    const intersects = raycaster.intersectObjects(playerMeshes, true);
-    
-    if (intersects.length > 0) {
-      // Encontrou um jogador sob o cursor
-      const intersectedObject = intersects[0].object;
-      
-      // Encontra o jogador dono deste objeto
-      for (let i = 0; i < playerMeshes.length; i++) {
-        if (playerMeshes[i] === intersectedObject || playerMeshes[i].children.includes(intersectedObject)) {
-          targetPlayer = players[playerIds[i]];
+    // Tenta encontrar o monstro dono desta mesh
+    for (let i = 0; i < monsterMeshes.length; i++) {
+      if (monsterMeshes[i] === intersectedObject || 
+          (monsterMeshes[i].children && monsterMeshes[i].children.includes(intersectedObject))) {
+        const monsterId = monsterIds[i];
+        const targetMonster = monsters[monsterId];
+        
+        if (targetMonster) {
+          updateTargetIndicator(targetMonster);
+          selectedTarget = targetMonster;
+          foundMonster = true;
           break;
         }
       }
     }
     
-    // Se encontrou um jogador, mira nele, senão usa a posição do mouse no plano
-    if (targetPlayer) {
-      if (localPlayer.castSpell(targetPlayer.mesh.position)) {
-        sendSpellCast(targetPlayer.mesh.position);
-        updateSpellCooldownHUD();
+    if (foundMonster) return;
+  }
+  
+  // Se não encontrou monstro, verifica jogadores
+  const playerMeshes = [];
+  const playerIds = [];
+  
+  for (const id in players) {
+    if (id === playerId) continue; // Skip local player
+    playerMeshes.push(players[id].mesh);
+    playerIds.push(id);
+    
+    // Adiciona também todas as partes do jogador para melhorar a detecção
+    if (players[id].parts) {
+      if (players[id].parts.body) {
+        playerMeshes.push(players[id].parts.body);
+        playerIds.push(id);
       }
-    } else {
-      if (localPlayer.castSpell(worldMousePosition)) {
-        sendSpellCast(worldMousePosition);
-        updateSpellCooldownHUD();
+      if (players[id].parts.head) {
+        playerMeshes.push(players[id].parts.head);
+        playerIds.push(id);
+      }
+      if (players[id].parts.arms) {
+        if (players[id].parts.arms.left) {
+          playerMeshes.push(players[id].parts.arms.left);
+          playerIds.push(id);
+        }
+        if (players[id].parts.arms.right) {
+          playerMeshes.push(players[id].parts.arms.right);
+          playerIds.push(id);
+        }
+      }
+      if (players[id].parts.legs) {
+        if (players[id].parts.legs.left) {
+          playerMeshes.push(players[id].parts.legs.left);
+          playerIds.push(id);
+        }
+        if (players[id].parts.legs.right) {
+          playerMeshes.push(players[id].parts.legs.right);
+          playerIds.push(id);
+        }
       }
     }
   }
   
-  // Lógica para botão direito (Ataque corpo a corpo)
+  intersects = raycaster.intersectObjects(playerMeshes, true);
+  
+  if (intersects.length > 0) {
+    // Found a player under cursor - highlight them
+    const intersectedObject = intersects[0].object;
+    let foundPlayer = false;
+    
+    for (let i = 0; i < playerMeshes.length; i++) {
+      if (playerMeshes[i] === intersectedObject || 
+          (playerMeshes[i].children && playerMeshes[i].children.includes(intersectedObject))) {
+        const targetId = playerIds[i];
+        
+        if (players[targetId]) {
+          updateTargetIndicator(players[targetId]);
+          selectedTarget = players[targetId];
+          foundPlayer = true;
+          break;
+        }
+      }
+    }
+    
+    if (foundPlayer) return;
+  }
+  
+  // If no player or monster under cursor, find intersection with ground
+  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  raycaster.ray.intersectPlane(groundPlane, worldMousePosition);
+  
+  // Hide target indicator
+  hideTargetIndicator();
+  selectedTarget = null;
+}
+
+// Update target indicator position
+function updateTargetIndicator(target) {
+  if (!targetIndicator || !target) return;
+  
+  // Project target position to screen coordinates
+  const screenPosition = target.mesh.position.clone();
+  screenPosition.y += 2; // Above target's head
+  screenPosition.project(camera);
+  
+  // Convert to CSS coordinates
+  const x = (screenPosition.x * 0.5 + 0.5) * window.innerWidth;
+  const y = (-screenPosition.y * 0.5 + 0.5) * window.innerHeight;
+  
+  // Adaptative size based on target type and distance
+  let baseSize;
+  
+  // Identifica se é monstro ou jogador e ajusta tamanho
+  if (target.id && (target.id.includes('goblin_') || target.id.includes('wolf_'))) {
+    // Tamanho base para monstros (menores)
+    baseSize = 24;
+    
+    // Ajusta ainda mais baseado no tipo específico
+    if (target.type === 'GOBLIN') {
+      baseSize = 22; // Goblins são menores
+    } else if (target.type === 'WOLF') {
+      baseSize = 26; // Lobos são um pouco maiores
+    }
+  } else {
+    // Tamanho base para jogadores (maiores)
+    baseSize = 30;
+  }
+  
+  // Ajuste baseado na distância (perspective)
+  const distance = camera.position.distanceTo(target.mesh.position);
+  const perspectiveAdjust = 15 / Math.max(1, distance / 10);
+  
+  // Tamanho final com todos os ajustes
+  const size = Math.max(15, baseSize + perspectiveAdjust);
+  
+  // Update indicator style
+  targetIndicator.style.display = 'block';
+  targetIndicator.style.left = `${x - size/2}px`;
+  targetIndicator.style.top = `${y - size/2}px`;
+  targetIndicator.style.width = `${size}px`;
+  targetIndicator.style.height = `${size}px`;
+  
+  // Ajusta cor do indicador baseado no tipo de alvo
+  if (target.id && (target.id.includes('goblin_') || target.id.includes('wolf_'))) {
+    targetIndicator.style.borderColor = '#e74c3c'; // Vermelho para monstros
+  } else {
+    targetIndicator.style.borderColor = '#3498db'; // Azul para jogadores
+  }
+  
+  // Store selected target
+  selectedTarget = target;
+}
+
+// Hide target indicator
+function hideTargetIndicator() {
+  if (targetIndicator) {
+    targetIndicator.style.display = 'none';
+  }
+  selectedTarget = null;
+}
+
+// Initialize UI elements
+function initUI() {
+  // Ensure basic UI elements exist
+  if (!document.getElementById('health-fill')) {
+    console.error('Health bar not found in DOM');
+  }
+  
+  if (!document.getElementById('mana-fill')) {
+    console.error('Mana bar not found in DOM');
+  }
+  
+  if (!document.getElementById('stamina-fill')) {
+    console.error('Stamina bar not found in DOM');
+  }
+  
+  // Initialize spell UI
+  updateSpellUI();
+}
+
+// Update spell UI to reflect current mana and cooldowns
+function updateSpellUI() {
+  if (!localPlayer) return;
+  
+  // Update each spell in the bar
+  const spellBar = document.getElementById('spell-bar');
+  
+  // Check if the player has enough mana for each spell
+  for (const spellName in localPlayer.spells) {
+    const spell = localPlayer.spells[spellName];
+    const spellElement = document.getElementById(`spell-${spellName}`);
+    
+    if (spellElement) {
+      // Check mana availability
+      const hasEnoughMana = localPlayer.stats.mana >= spell.manaCost;
+      if (hasEnoughMana) {
+        spellElement.classList.remove('disabled');
+      } else {
+        spellElement.classList.add('disabled');
+      }
+      
+      // Update cooldown visualization
+      const cooldownMask = spellElement.querySelector('.spell-cooldown-mask');
+      if (cooldownMask) {
+        const now = Date.now();
+        const timeSinceLastCast = (now - spell.lastCast) / 1000;
+        
+        if (timeSinceLastCast < spell.cooldown) {
+          // Calculate cooldown progress
+          const cooldownProgress = timeSinceLastCast / spell.cooldown;
+          const degrees = 360 * cooldownProgress;
+          
+          // Update mask position
+          cooldownMask.style.display = 'block';
+          cooldownMask.style.transform = `rotate(${degrees}deg)`;
+        } else {
+          cooldownMask.style.display = 'none';
+        }
+      }
+    }
+  }
+}
+
+// Handle mouse clicks for attacks and spells
+function onMouseClick(event) {
+  if (!gameStarted || !localPlayer || document.activeElement === document.getElementById('chat-input')) {
+    return;
+  }
+  
+  // Left click for spells
+  if (event.button === 0) {
+    castSpellAtTarget(event);
+  }
+  // Right click for melee attack
   else if (event.button === 2) {
-    // Primeiro verificamos se há um jogador sob o cursor
-    let targetPlayer = null;
-    let targetId = null;
-    
-    // Converte coordenadas do mouse para coordenadas normalizadas (-1 a 1)
-    const mouse = new THREE.Vector2();
-    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-    
-    // Atualiza o raycaster
-    raycaster.setFromCamera(mouse, camera);
-    
-    // Cria um array de meshes de jogadores para verificar interseção
-    const playerMeshes = [];
-    const playerIds = [];
-    
-    for (const id in players) {
-      if (id === playerId) continue; // Ignora o próprio jogador
-      
-      // Adiciona tanto o mesh principal quanto as partes individuais
-      playerMeshes.push(players[id].mesh);
-      playerIds.push(id);
-      
-      // Adiciona partes do corpo para melhor detecção de colisão
-      if (players[id].parts) {
-        for (const partKey in players[id].parts) {
-          const part = players[id].parts[partKey];
-          if (part instanceof THREE.Mesh) {
-            playerMeshes.push(part);
-            playerIds.push(id);
-          } else if (part.left instanceof THREE.Mesh) {
-            playerMeshes.push(part.left);
-            playerMeshes.push(part.right);
-            playerIds.push(id);
-            playerIds.push(id);
-          }
-        }
-      }
+    performMeleeAttack(event);
+  }
+}
+
+// Cast spell at target or position
+function castSpellAtTarget(event) {
+  // Ignora se não tiver mana ou vigor suficientes
+  const spell = localPlayer.spells.fireball;
+  if (localPlayer.stats.mana < spell.manaCost) {
+    addSystemMessage("Mana insuficiente!");
+    return;
+  }
+  
+  const STAMINA_COST = 5;
+  if (localPlayer.stats.stamina < STAMINA_COST) {
+    addSystemMessage("Vigor insuficiente para lançar magia!");
+    return;
+  }
+  
+  // First check if we have a selected target
+  if (selectedTarget) {
+    if (localPlayer.castSpell(selectedTarget.mesh.position)) {
+      sendSpellCast(selectedTarget.mesh.position);
     }
-    
-    // Verifica interseção com jogadores
-    const intersects = raycaster.intersectObjects(playerMeshes, true);
-    
-    if (intersects.length > 0) {
-      // Encontrou um jogador sob o cursor
-      const intersectedObject = intersects[0].object;
-      
-      // Encontra o jogador dono deste objeto
-      let found = false;
-      for (let i = 0; i < playerMeshes.length && !found; i++) {
-        if (playerMeshes[i] === intersectedObject || 
-            (playerMeshes[i].children && playerMeshes[i].children.includes(intersectedObject))) {
-          targetId = playerIds[i];
-          targetPlayer = players[targetId];
-          found = true;
-        }
-      }
-      
-      // Se não encontrou o dono, verifica se é uma parte do corpo
-      if (!found) {
-        for (const id in players) {
-          if (id === playerId) continue;
-          
-          // Verifica todas as partes do corpo
-          if (players[id].parts) {
-            for (const partKey in players[id].parts) {
-              const part = players[id].parts[partKey];
-              if (part === intersectedObject || 
-                  (part.left && (part.left === intersectedObject || part.right === intersectedObject))) {
-                targetId = id;
-                targetPlayer = players[id];
-                found = true;
-                break;
-              }
-            }
-          }
-          
-          if (found) break;
-        }
-      }
+  } else {
+    // Otherwise cast at mouse position on ground
+    if (localPlayer.castSpell(worldMousePosition)) {
+      sendSpellCast(worldMousePosition);
     }
-    
-    // Se encontrou um alvo, mira nele e ataca
-    if (targetPlayer) {
-      localPlayer.attack(targetPlayer.mesh.position);
+  }
+}
+
+// Perform melee attack at target or position
+function performMeleeAttack(event) {
+  // Ignora se não tiver vigor suficiente
+  const STAMINA_COST = 10;
+  if (localPlayer.stats.stamina < STAMINA_COST) {
+    addSystemMessage("Vigor insuficiente para atacar!");
+    return;
+  }
+  
+  // Check if we have a selected target
+  if (selectedTarget) {
+    // Verificar se o alvo é um monstro ou jogador
+    if (selectedTarget.id && (selectedTarget.id.includes('goblin_') || selectedTarget.id.includes('wolf_'))) {
+      // É um monstro
+      localPlayer.attack(selectedTarget.mesh.position);
       
       // Envia ataque direcionado para o servidor
+      sendPlayerAttack({
+        targetId: selectedTarget.id,
+        position: {
+          x: localPlayer.mesh.position.x,
+          y: localPlayer.mesh.position.y,
+          z: localPlayer.mesh.position.z
+        },
+        rotation: {
+          y: localPlayer.mesh.rotation.y
+        }
+      });
+    } else {
+      // É um jogador (código original)
+      const targetId = Object.keys(players).find(id => players[id] === selectedTarget);
+      
+      localPlayer.attack(selectedTarget.mesh.position);
+      
+      // Envia ataque para o servidor
       sendPlayerAttack({
         targetId: targetId,
         position: {
@@ -252,111 +460,146 @@ function onMouseClick(event) {
           y: localPlayer.mesh.rotation.y
         }
       });
-    } else {
-      // Ataque no ar (direção do mouse)
-      localPlayer.attack(worldMousePosition);
-      
-      // Envia ataque normal para o servidor
-      sendPlayerAttack({
-        position: {
-          x: localPlayer.mesh.position.x,
-          y: localPlayer.mesh.position.y,
-          z: localPlayer.mesh.position.z
-        },
-        rotation: {
-          y: localPlayer.mesh.rotation.y
-        }
-      });
     }
-  }
-}
-
-// Atualiza o HUD de cooldown da magia
-function updateSpellCooldownHUD() {
-  if (!localPlayer) return;
-  
-  const cooldownElement = document.getElementById('spell-cooldown');
-  
-  if (localPlayer.spellCooldown > 0) {
-    cooldownElement.style.display = 'block';
-    cooldownElement.textContent = localPlayer.spellCooldown;
-    
-    // Atualiza o texto a cada segundo
-    const updateCooldown = () => {
-      if (localPlayer.spellCooldown > 0) {
-        cooldownElement.textContent = localPlayer.spellCooldown;
-        setTimeout(updateCooldown, 1000);
-      } else {
-        cooldownElement.style.display = 'none';
-      }
-    };
-    
-    setTimeout(updateCooldown, 1000);
   } else {
-    cooldownElement.style.display = 'none';
+    // Ataque no ar (direção do mouse)
+    localPlayer.attack(worldMousePosition);
+    
+    // Envia ataque normal para o servidor
+    sendPlayerAttack({
+      position: {
+        x: localPlayer.mesh.position.x,
+        y: localPlayer.mesh.position.y,
+        z: localPlayer.mesh.position.z
+      },
+      rotation: {
+        y: localPlayer.mesh.rotation.y
+      }
+    });
   }
 }
 
-// Esconde a tela de carregamento
+// Handle keyboard inputs
+function handleKeydown(event) {
+  // Emergency teleport (for getting unstuck)
+  if (event.key === 'r' && localPlayer) {
+    const safePosition = new THREE.Vector3(0, 0, 0);
+    localPlayer.mesh.position.copy(safePosition);
+    localPlayer.updateCollider();
+    localPlayer.lastValidPosition.copy(safePosition);
+    
+    sendPlayerMove({
+      position: {
+        x: localPlayer.mesh.position.x,
+        y: localPlayer.mesh.position.y,
+        z: localPlayer.mesh.position.z
+      },
+      rotation: {
+        y: localPlayer.mesh.rotation.y
+      }
+    });
+    
+    addSystemMessage("Você foi teletransportado para uma posição segura.");
+  }
+  
+  // Number keys for spell selection (1-9)
+  if (!isNaN(parseInt(event.key)) && parseInt(event.key) >= 1 && parseInt(event.key) <= 9) {
+    // Select corresponding spell (implement spell selection logic here)
+    console.log(`Selected spell slot ${event.key}`);
+  }
+}
+
+// Hide loading screen
 function hideLoadingScreen() {
   const loadingScreen = document.getElementById('loading-screen');
   loadingScreen.style.display = 'none';
 }
 
-// Atualiza as dimensões do renderizador quando a janela é redimensionada
+// Handle window resize
 function onWindowResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-// Loop de animação
+// Main animation loop
 function animate() {
   requestAnimationFrame(animate);
   
   if (gameStarted && localPlayer) {
-    // Atualiza o jogador local
+    // Update local player
     updateLocalPlayer();
-
-    // Atualiza projéteis
+    
+    // Update projectiles
     updateProjectiles();
     
-    // Atualiza a câmera para seguir o jogador
+    // Atualiza animações de monstros
+    animateMonsters();
+    
+    // Update camera
     updateCamera();
     
-    // Atualiza os balões de chat
+    // Update chat bubbles
     updateChatBubbles();
     
-    // Renderiza a cena
-    renderer.render(scene, camera);
+    // Atualiza UI de monstros
+    updateMonstersUI(camera);
     
-    // Atualiza o UI
+    // Update UI
     updateUI();
+    
+    // Update experience bar
+    updateExpBar();
+    
+    // Update target indicator if target exists
+    if (selectedTarget) {
+      updateTargetIndicator(selectedTarget);
+    }
+    
+    // Render scene
+    renderer.render(scene, camera);
   }
 }
 
-// Atualiza todos os projéteis em movimento
+// Update all projectiles
 function updateProjectiles() {
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const projectile = projectiles[i];
-    // Se o update retornar false, remove o projétil
+    // If update returns false, remove the projectile
     if (!projectile.update()) {
       projectiles.splice(i, 1);
     }
   }
 }
 
-// Atualiza o jogador local com base nas entradas
+// Adicione esta função ao client/js/game.js para obter todos os colliders
+function getAllColliders() {
+  const colliders = getWorldColliders() || [];
+  
+  // Adiciona colliders de monstros
+  if (typeof monsters !== 'undefined') {
+    for (const id in monsters) {
+      if (monsters[id].collider) {
+        colliders.push(monsters[id].collider);
+      }
+    }
+  }
+  
+  return colliders;
+}
+
+// Update local player based on inputs
 function updateLocalPlayer() {
   const moveDirection = getMovementDirection();
   
   if (moveDirection.length() > 0) {
-    // Tenta mover o jogador, respeitando colisões
-    const SPEED = 0.15;
-    const moved = localPlayer.move(moveDirection, SPEED, getWorldColliders());
+    // Try to move player, respecting collisions
+    const SPEED = localPlayer.moveSpeed || 0.15;
+    // Use getAllColliders em vez de getWorldColliders
+    const moved = localPlayer.move(moveDirection, SPEED, getAllColliders());
     
     if (moved) {
-      // Envia a atualização para o servidor
+      // Send update to server
       sendPlayerMove({
         position: {
           x: localPlayer.mesh.position.x,
@@ -368,9 +611,10 @@ function updateLocalPlayer() {
         }
       });
     } else {
-      // Se não conseguiu mover, verifica se está preso
-      if (localPlayer.checkCollisions(getWorldColliders())) {
-        const escaped = localPlayer.escapeCollision(getWorldColliders());
+      // If movement failed, check if stuck
+      // Use getAllColliders aqui também
+      if (localPlayer.checkCollisions(getAllColliders())) {
+        const escaped = localPlayer.escapeCollision(getAllColliders());
         
         if (escaped) {
           sendPlayerMove({
@@ -388,39 +632,22 @@ function updateLocalPlayer() {
     }
   }
   
-  // Verifica ataques corpo a corpo
+  // Check for melee attacks
   if (isAttacking() && !localPlayer.isAttacking) {
-    localPlayer.attack();
-    sendPlayerAttack();
+    // Check if we have enough stamina
+    const STAMINA_COST = 10;
+    if (localPlayer.stats.stamina >= STAMINA_COST) {
+      localPlayer.attack();
+      localPlayer.stats.stamina -= STAMINA_COST;
+      localPlayer.updateUI();
+      sendPlayerAttack();
+    } else {
+      addSystemMessage("Vigor insuficiente para atacar!");
+    }
   }
 }
 
-// Tecla de emergência para situações onde o jogador fica realmente preso
-  // Pressionando a tecla 'r' o jogador é transportado para uma posição conhecida segura
-  if (isKeyPressed('r')) {
-    // Reposiciona o jogador em uma posição segura
-    const safePosition = new THREE.Vector3(0, 0, 0);
-    localPlayer.mesh.position.copy(safePosition);
-    localPlayer.updateCollider();
-    localPlayer.lastValidPosition.copy(safePosition);
-    
-    // Notifica o servidor
-    sendPlayerMove({
-      position: {
-        x: localPlayer.mesh.position.x,
-        y: localPlayer.mesh.position.y,
-        z: localPlayer.mesh.position.z
-      },
-      rotation: {
-        y: localPlayer.mesh.rotation.y
-      }
-    });
-    
-    // Exibe uma mensagem
-    addSystemMessage("Você foi teletransportado para uma posição segura.");
-  }
-
-// Atualiza a câmera para seguir o jogador
+// Update camera position
 function updateCamera() {
   if (localPlayer) {
     const offset = new THREE.Vector3(0, 8, 10);
@@ -429,23 +656,49 @@ function updateCamera() {
   }
 }
 
-// Atualiza os balões de chat de todos os jogadores
+// Update chat bubble positions
 function updateChatBubbles() {
   for (const id in players) {
     players[id].updateChatBubblePosition(camera);
   }
 }
 
-// Atualiza a interface do usuário
+// Update UI elements
 function updateUI() {
   if (localPlayer) {
+    // Update health and mana bars
     const healthFill = document.getElementById('health-fill');
-    const healthPercent = (localPlayer.health / 100) * 100;
+    const healthPercent = (localPlayer.stats.health / localPlayer.stats.maxHealth) * 100;
     healthFill.style.width = `${healthPercent}%`;
+    
+    const manaFill = document.getElementById('mana-fill');
+    const manaPercent = (localPlayer.stats.mana / localPlayer.stats.maxMana) * 100;
+    manaFill.style.width = `${manaPercent}%`;
+    
+    const staminaFill = document.getElementById('stamina-fill');
+    const staminaPercent = (localPlayer.stats.stamina / localPlayer.stats.maxStamina) * 100;
+    staminaFill.style.width = `${staminaPercent}%`;
+    
+    // Update spell cooldowns
+    updateSpellUI();
+    
+    // Update stats display if panel is visible
+    const statsPanel = document.getElementById('stats-panel');
+    if (statsPanel && statsPanel.classList.contains('visible')) {
+      updateStatsUI();
+    }
+    
+    // Update derived stat displays
+    document.getElementById('health-max-value').textContent = 
+      `${Math.floor(localPlayer.stats.health)}/${localPlayer.stats.maxHealth}`;
+    document.getElementById('mana-max-value').textContent = 
+      `${Math.floor(localPlayer.stats.mana)}/${localPlayer.stats.maxMana}`;
+    document.getElementById('stamina-max-value').textContent = 
+      `${Math.floor(localPlayer.stats.stamina)}/${localPlayer.stats.maxStamina}`;
   }
 }
 
-// Mostra tela de morte para o jogador local
+// Show death screen for local player
 function showDeathScreen() {
   const deathScreen = document.createElement('div');
   deathScreen.id = 'death-screen';
@@ -466,14 +719,33 @@ function showDeathScreen() {
   
   document.body.appendChild(deathScreen);
   
-  // Animação de morte para o jogador local
+  // Death animation
   localPlayer.die();
   
-  // Remove a tela após 5 segundos (tempo de respawn)
+  // Remove screen after 5 seconds
   setTimeout(() => {
     document.body.removeChild(deathScreen);
   }, 5000);
 }
 
-// Inicializa o jogo quando a página carrega
+// Show experience gain notification
+function showExperienceGain(amount) {
+  const expElement = document.createElement('div');
+  expElement.className = 'exp-gain';
+  expElement.textContent = `+${amount} XP`;
+  
+  // Position in center-bottom of screen
+  expElement.style.left = '50%';
+  expElement.style.bottom = '100px';
+  expElement.style.transform = 'translateX(-50%)';
+  
+  document.body.appendChild(expElement);
+  
+  // Remove after animation completes
+  setTimeout(() => {
+    document.body.removeChild(expElement);
+  }, 2000);
+}
+
+// Initialize game on page load
 window.onload = init;

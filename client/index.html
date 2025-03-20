@@ -9,31 +9,117 @@
 <body>
   <div id="game-container">
     <canvas id="game-canvas"></canvas>
+    
     <div id="ui-container">
-      <div id="health-bar">
-        <div id="health-fill"></div>
-      </div>
-      <div id="player-info">
-        <span id="player-name">Jogador</span>
-      </div>
-      <div id="chat-container">
-        <div id="chat-messages"></div>
-        <div id="chat-input-container">
-          <input type="text" id="chat-input" placeholder="Pressione Enter para conversar...">
+      <!-- Player status bars -->
+      <div id="status-bars">
+        <div class="status-bar" id="health-bar">
+          <div class="status-bar-label">HP</div>
+          <div class="status-bar-fill" id="health-fill"></div>
+        </div>
+        
+        <div class="status-bar" id="mana-bar">
+          <div class="status-bar-label">MP</div>
+          <div class="status-bar-fill" id="mana-fill"></div>
+        </div>
+        
+        <div class="status-bar" id="stamina-bar">
+          <div class="status-bar-label">ST</div>
+          <div class="status-bar-fill" id="stamina-fill"></div>
         </div>
       </div>
+      
+      <div id="player-info">
+        <span id="player-name">Jogador</span>
+        <span id="player-level">Nível 1</span>
+      </div>
     </div>
+    
+    <!-- Character stats panel -->
+    <div id="stats-panel">
+      <div class="stats-header">
+        <h3>Atributos</h3>
+        <div id="stat-points">Pontos: <span id="available-points">20</span></div>
+      </div>
+      
+      <div class="stat-row">
+        <div class="stat-label">Força</div>
+        <div class="stat-value" id="strength-value">10</div>
+        <button class="stat-button" data-stat="strength">+</button>
+      </div>
+      
+      <div class="stat-row">
+        <div class="stat-label">Agilidade</div>
+        <div class="stat-value" id="agility-value">10</div>
+        <button class="stat-button" data-stat="agility">+</button>
+      </div>
+      
+      <div class="stat-row">
+        <div class="stat-label">Vitalidade</div>
+        <div class="stat-value" id="vitality-value">10</div>
+        <button class="stat-button" data-stat="vitality">+</button>
+      </div>
+      
+      <div class="stat-row">
+        <div class="stat-label">Energia</div>
+        <div class="stat-value" id="energy-value">10</div>
+        <button class="stat-button" data-stat="energy">+</button>
+      </div>
+      
+      <div class="stats-footer">
+        <div class="derived-stat">Vida: <span id="health-max-value">100/100</span></div>
+        <div class="derived-stat">Mana: <span id="mana-max-value">100/100</span></div>
+        <div class="derived-stat">Vigor: <span id="stamina-max-value">100/100</span></div>
+        <div class="derived-stat">Defesa: <span id="defense-value">5</span></div>
+        <div class="derived-stat">Velocidade: <span id="speed-value">0.15</span></div>
+        <div class="derived-stat">Dano Físico: <span id="phys-dmg-value">10</span></div>
+        <div class="derived-stat">Dano Mágico: <span id="magic-dmg-value">15</span></div>
+      </div>
+      
+      <button id="toggle-stats">Stats</button>
+    </div>
+    
+    <!-- Spell bar on the right side -->
+    <div id="spell-bar">
+      <div class="spell-icon" id="spell-fireball">
+        <div class="spell-icon-image fireball-icon"></div>
+        <div class="spell-cooldown-mask" style="display: none;"></div>
+        <div class="spell-cost">15</div>
+      </div>
+      <!-- More spells can be added here -->
+    </div>
+    
+    <!-- Experience bar -->
+    <div id="exp-bar">
+      <div id="exp-fill"></div>
+    </div>
+    
+    <!-- Centered chat -->
+    <div id="chat-container">
+      <div id="chat-messages"></div>
+      <div id="chat-input-container">
+        <input type="text" id="chat-input" placeholder="Pressione Enter para conversar...">
+      </div>
+    </div>
+    
+    <!-- Target selection indicator -->
+    <div id="target-indicator"></div>
+    
+    <!-- Loading screen -->
     <div id="loading-screen">Carregando...</div>
   </div>
 
   <!-- Scripts -->
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="js/utils.js"></script>
   <script src="js/input.js"></script>
   <script src="js/player.js"></script>
   <script src="js/world.js"></script>
   <script src="js/networking.js"></script>
   <script src="js/chat.js"></script>
+  <script src="js/stats.js"></script>
+  <script src="js/monsters.js"></script>
   <script src="js/game.js"></script>
 </body>
 </html>
