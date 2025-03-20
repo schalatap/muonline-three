@@ -12,6 +12,9 @@ class GameWorld {
     
     // Cria o mapa (uma versão simplificada de Lorencia)
     this.createMap();
+    
+    // Registra os colliders de todos os objetos do mundo
+    this.registerWorldColliders();
   }
   
   // Adiciona luzes à cena
@@ -67,9 +70,6 @@ class GameWorld {
     
     // Adiciona uma muralha simples em volta
     this.createWall();
-
-    // Após criar todos os objetos, registramos seus collidables
-    this.registerWorldColliders();
   }
   
   // Cria uma fonte no centro da cidade
@@ -225,8 +225,10 @@ class GameWorld {
     }
   }
   
-  // Adicionar um novo método para registrar collidables
+  // Registrar collidables do mundo - CORRIGIDO, removida chamada recursiva
   registerWorldColliders() {
+    console.log("Registrando colliders do mundo");
+    
     // Fonte central
     this.registerStaticCollider({
       id: 'fountain',
@@ -342,17 +344,26 @@ class GameWorld {
       height: 3,
       depth: 100 * 0.98
     });
+    
+    console.log("Colliders de mundo registrados com sucesso");
   }
 
   // Método auxiliar para registrar collidables estáticos
   registerStaticCollider(object) {
-    window.CollisionSystem.createStaticCollidable(object);
+    if (!window.CollisionSystem) {
+      console.error("Sistema de colisão não disponível ao registrar collider estático");
+      return null;
+    }
+    return window.CollisionSystem.createStaticCollidable(object);
   }
   
   // Retorna a lista de colliders
   getColliders() {
     // Usar o novo sistema
-    return window.CollisionSystem.collisionManager.getActiveColliderBoxes();
+    if (window.CollisionSystem && window.CollisionSystem.collisionManager) {
+      return window.CollisionSystem.collisionManager.getActiveColliderBoxes();
+    }
+    return [];
   }
 }
 

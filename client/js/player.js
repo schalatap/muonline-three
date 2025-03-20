@@ -253,7 +253,7 @@ class Player {
     }
   }
   
-  // Update collision box
+  // Update collision box - Função corrigida
   updateCollider() {
     const pos = this.mesh.position;
     
@@ -265,8 +265,33 @@ class Player {
     
     // Atualiza a posição no sistema de colisão unificado
     if (window.CollisionSystem && window.CollisionSystem.collisionManager) {
-      window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, pos);
+      // Verifica se o collidable do jogador existe
+      const collidable = window.CollisionSystem.collisionManager.getCollidableByEntityId(this.id);
+      
+      if (collidable) {
+        window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, pos);
+      } else {
+        console.warn(`Collidable não encontrado para o jogador ${this.id}. Criando novo collidable.`);
+        // Se não existe, criar um novo collidable
+        window.CollisionSystem.createPlayerCollidable(this);
+      }
     }
+  }
+
+  // Adicione esse método para verificar colisões usando o sistema antigo
+  checkCollisionsOld(worldColliders) {
+    if (!this.collider) {
+      return false;
+    }
+    
+    // Verifica colisão com objetos do mundo
+    for (const collider of worldColliders) {
+      if (this.collider.intersectsBox(collider)) {
+        return true;
+      }
+    }
+    
+    return false;
   }
   
   // Move player
@@ -286,20 +311,34 @@ class Player {
       this.mesh.position.x += step;
       
       // Atualizar o collidable do player
-      window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
-      
-      // Verificar colisões
-      const collisions = window.CollisionSystem.collisionManager.checkEntityCollisions(
-        this.id, 
-        [window.CollisionSystem.COLLIDABLE_TYPES.STATIC, window.CollisionSystem.COLLIDABLE_TYPES.MONSTER]
-      );
-      
-      if (collisions.length > 0) {
-        // Reverter movimento no eixo X
-        this.mesh.position.x = originalPosition.x;
+      if (window.CollisionSystem && window.CollisionSystem.collisionManager) {
         window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
+      
+        // Verificar colisões
+        const collisions = window.CollisionSystem.collisionManager.checkEntityCollisions(
+          this.id, 
+          [window.CollisionSystem.COLLIDABLE_TYPES.STATIC, window.CollisionSystem.COLLIDABLE_TYPES.MONSTER]
+        );
+        
+        if (collisions.length > 0) {
+          // Debug - saber quais objetos estão colidindo
+          console.log("Colisão detectada no eixo X:", collisions.map(c => c.collidable.id));
+          
+          // Reverter movimento no eixo X
+          this.mesh.position.x = originalPosition.x;
+          window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
+        } else {
+          moved = true;
+        }
       } else {
-        moved = true;
+        // Fallback para o caso do sistema de colisão não estar disponível
+        this.updateCollider();
+        if (this.checkCollisionsOld(worldColliders)) {
+          this.mesh.position.x = originalPosition.x;
+          this.updateCollider();
+        } else {
+          moved = true;
+        }
       }
     }
     
@@ -309,20 +348,34 @@ class Player {
       this.mesh.position.z += step;
       
       // Atualizar o collidable do player
-      window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
-      
-      // Verificar colisões
-      const collisions = window.CollisionSystem.collisionManager.checkEntityCollisions(
-        this.id, 
-        [window.CollisionSystem.COLLIDABLE_TYPES.STATIC, window.CollisionSystem.COLLIDABLE_TYPES.MONSTER]
-      );
-      
-      if (collisions.length > 0) {
-        // Reverter movimento no eixo Z
-        this.mesh.position.z = originalPosition.z;
+      if (window.CollisionSystem && window.CollisionSystem.collisionManager) {
         window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
+        
+        // Verificar colisões
+        const collisions = window.CollisionSystem.collisionManager.checkEntityCollisions(
+          this.id, 
+          [window.CollisionSystem.COLLIDABLE_TYPES.STATIC, window.CollisionSystem.COLLIDABLE_TYPES.MONSTER]
+        );
+        
+        if (collisions.length > 0) {
+          // Debug - saber quais objetos estão colidindo
+          console.log("Colisão detectada no eixo Z:", collisions.map(c => c.collidable.id));
+          
+          // Reverter movimento no eixo Z
+          this.mesh.position.z = originalPosition.z;
+          window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
+        } else {
+          moved = true;
+        }
       } else {
-        moved = true;
+        // Fallback para o caso do sistema de colisão não estar disponível
+        this.updateCollider();
+        if (this.checkCollisionsOld(worldColliders)) {
+          this.mesh.position.z = originalPosition.z;
+          this.updateCollider();
+        } else {
+          moved = true;
+        }
       }
     }
     
@@ -337,7 +390,7 @@ class Player {
       
       // Animar caminhada
       this.animateWalk();
-    } else if (this.checkCollisions(worldColliders)) {
+    } else if (this.checkCollisionsOld(worldColliders)) {
       // Se ainda estiver preso, tentar escapar
       this.escapeCollision(worldColliders);
     }

@@ -4,12 +4,8 @@ const socketIO = require('socket.io');
 const path = require('path');
 const { handlePlayerConnection } = require('./game');
 
-const { 
-  CollisionManager, 
-  Collidable, 
-  COLLIDABLE_TYPES, 
-  COLLIDER_SHAPES
-} = require('../shared/collision');
+// Importe o sistema de colisão unificado
+const CollisionSystem = require('../shared/collision');
 
 // Configuração do Express
 const app = express();
@@ -22,6 +18,11 @@ const MAX_CONNECTIONS = 50; // Limite máximo de jogadores simultâneos
 
 // Servir arquivos estáticos do cliente
 app.use(express.static(path.join(__dirname, '../client')));
+
+// Tornar o arquivo de colisão compartilhado acessível para o cliente
+app.get('/shared/collision.js', (req, res) => {
+  res.sendFile(path.join(__dirname, '../shared/collision.js'));
+});
 
 // Rota principal
 app.get('/', (req, res) => {
