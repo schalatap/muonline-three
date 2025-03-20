@@ -1,3 +1,7 @@
+/**
+ * Sistema de entrada para controlar as ações do jogador
+ */
+
 // Estado das teclas e do mouse
 const keys = {
   w: false,
@@ -41,6 +45,14 @@ function initInputSystem() {
     mousePosition.x = e.clientX;
     mousePosition.y = e.clientY;
   });
+  
+  // Previne comportamentos padrão de teclas que usamos
+  window.addEventListener('keydown', (e) => {
+    // Previne o comportamento padrão do espaço, que rola a página
+    if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();
+    }
+  });
 }
 
 // Atualiza o estado da tecla
@@ -70,4 +82,9 @@ function isAttacking() {
 // Obtém a posição do mouse
 function getMousePosition() {
   return { ...mousePosition };
+}
+
+// Verifica se uma tecla específica está pressionada
+function isKeyPressed(key) {
+  return keys[key] || false;
 }
