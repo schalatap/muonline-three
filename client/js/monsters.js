@@ -445,16 +445,8 @@ function updateMonstersState(monstersData) {
       // Atualiza monstro existente
       const monster = monsters[id];
       
-      // Guarda a posição anterior para verificar colisão
-      const prevPosition = { 
-        x: monster.mesh.position.x,
-        y: monster.mesh.position.y,
-        z: monster.mesh.position.z 
-      };
-      
-      // Posição e rotação com interpolação suave
+      // Atualiza posição com interpolação
       if (monster.mesh) {
-        // Aplicar interpolação
         monster.mesh.position.x += (data.position.x - monster.mesh.position.x) * 0.3;
         monster.mesh.position.y += (data.position.y - monster.mesh.position.y) * 0.3;
         monster.mesh.position.z += (data.position.z - monster.mesh.position.z) * 0.3;
@@ -462,57 +454,20 @@ function updateMonstersState(monstersData) {
         if (data.rotation) {
           monster.mesh.rotation.y += (data.rotation.y - monster.mesh.rotation.y) * 0.3;
         }
-        
-        // NOVO: Verificar se houve colisão com obstáculo (mudança pequena ou nenhuma na posição)
-        const movedDistance = Math.sqrt(
-          Math.pow(monster.mesh.position.x - prevPosition.x, 2) +
-          Math.pow(monster.mesh.position.z - prevPosition.z, 2)
-        );
-        
-        // Se o monstro tentou se mover mas foi bloqueado
-        if (data.state === 'chase' && movedDistance < 0.01) {
-          // Calcular direção da colisão (oposta à direção de movimento desejada)
-          const moveDir = {
-            x: data.position.x - prevPosition.x,
-            z: data.position.z - prevPosition.z
-          };
-          
-          // Normalizar
-          const moveMag = Math.sqrt(moveDir.x * moveDir.x + moveDir.z * moveDir.z);
-          if (moveMag > 0) {
-            moveDir.x /= moveMag;
-            moveDir.z /= moveMag;
-          }
-          
-          // Inverter direção para mostrar impacto
-          const collisionDir = { x: -moveDir.x, z: -moveDir.z };
-          
-          // Mostrar animação de colisão
-          handleMonsterCollision(monster, collisionDir);
-        }
       }
       
-      // Estatísticas
+      // Atualiza estatísticas se fornecidas
       if (data.stats) {
         monster.stats = data.stats;
       }
       
-      // Estado
-      if (data.state) {
-        // Se o estado mudou de 'dead' para outro, ou vice-versa, atualizar colisão
-        const stateChanged = monster.state !== data.state;
-        const wasDeadNowAlive = monster.state === 'dead' && data.state !== 'dead';
-        const wasAliveNowDead = monster.state !== 'dead' && data.state === 'dead';
-        
+      // Atualiza estado - usa função centralizada
+      if (data.state !== undefined && monster.state !== data.state) {
         monster.state = data.state;
         
-        // Se o estado mudou, atualizar o estado da colisão imediatamente
-        if (stateChanged) {
-          if (wasDeadNowAlive && window.CollisionSystem && window.CollisionSystem.collisionManager) {
-            window.CollisionSystem.collisionManager.enableCollisionForEntity(monster.id);
-          } else if (wasAliveNowDead && window.CollisionSystem && window.CollisionSystem.collisionManager) {
-            window.CollisionSystem.collisionManager.disableCollisionForEntity(monster.id);
-          }
+        // Atualiza estado de colisão
+        if (window.CollisionSystem) {
+          window.CollisionSystem.updateMonsterCollisionState(monster.id, monster.state);
         }
       }
     } else {

@@ -675,5 +675,194 @@
     return true;
   };
 
+  // Constantes centralizadas para evitar valores hardcoded espalhados
+  exports.COLLISION_CONSTANTS = {
+    PLAYER_WIDTH: 0.9,
+    PLAYER_HEIGHT: 1.8,
+    PLAYER_DEPTH: 0.6,
+    GOBLIN_WIDTH: 0.8,
+    GOBLIN_HEIGHT: 1.4,
+    GOBLIN_DEPTH: 0.8,
+    WOLF_WIDTH: 1.0,
+    WOLF_HEIGHT: 1.2,
+    WOLF_DEPTH: 1.4,
+    MELEE_ATTACK_RANGE: 2.5,
+    SPELL_RANGE: 20
+  };
+
+  /**
+   * Função unificada de movimento com colisão
+   * @param {string} entityId - ID da entidade
+   * @param {Object} currentPosition - Posição atual
+   * @param {Object} direction - Direção normalizada
+   * @param {number} speed - Velocidade
+   * @param {Array} collisionTypes - Tipos de colisão a verificar
+   * @returns {Object} Resultado do movimento
+   */
+  exports.moveWithCollision = function(entityId, currentPosition, direction, speed, collisionTypes) {
+    const manager = getCollisionManager();
+    const collidable = manager.getCollidableByEntityId(entityId);
+    
+    if (!collidable || !collidable.enabled) {
+      return { success: false, reason: "No valid collidable" };
+    }
+    
+    // Guardar posição original
+    const originalPosition = { ...collidable.position };
+    
+    // Calcular posição alvo
+    const targetPosition = {
+      x: currentPosition.x + direction.x * speed,
+      y: currentPosition.y,
+      z: currentPosition.z + direction.z * speed
+    };
+    
+    // Verificar colisão
+    manager.updateCollidablePosition(entityId, targetPosition);
+    const collisions = manager.checkEntityCollisions(entityId, collisionTypes);
+    manager.updateCollidablePosition(entityId, originalPosition);
+    
+    // Se não há colisão, movimento direto
+    if (collisions.length === 0) {
+      return {
+        success: true,
+        newPosition: targetPosition,
+        collision: false
+      };
+    }
+    
+    // Calcular direção de escape
+    let escapeX = 0, escapeZ = 0;
+    for (const collision of collisions) {
+      if (collision.direction) {
+        escapeX += collision.direction.x;
+        escapeZ += collision.direction.z;
+      }
+    }
+    
+    // Normalizar direção de escape
+    const escapeLength = Math.sqrt(escapeX * escapeX + escapeZ * escapeZ);
+    if (escapeLength > 0) {
+      escapeX /= escapeLength;
+      escapeZ /= escapeLength;
+    }
+    
+    // Calcular direção de deslizamento
+    const dotProduct = direction.x * escapeX + direction.z * escapeZ;
+    const slideX = direction.x - escapeX * dotProduct;
+    const slideZ = direction.z - escapeZ * dotProduct;
+    const slideLength = Math.sqrt(slideX * slideX + slideZ * slideZ);
+    
+    // Se possível, deslizar junto da superfície
+    if (slideLength > 0.1) {
+      const slidePosition = {
+        x: currentPosition.x + (slideX / slideLength) * speed * 0.8,
+        y: currentPosition.y,
+        z: currentPosition.z + (slideZ / slideLength) * speed * 0.8
+      };
+      
+      manager.updateCollidablePosition(entityId, slidePosition);
+      const slideCollisions = manager.checkEntityCollisions(entityId, collisionTypes);
+      manager.updateCollidablePosition(entityId, originalPosition);
+      
+      if (slideCollisions.length === 0) {
+        return {
+          success: true,
+          newPosition: slidePosition,
+          collision: true,
+          slide: true
+        };
+      }
+    }
+    
+    // Tentar movimento apenas nos eixos individuais
+    const xPosition = {
+      x: currentPosition.x + direction.x * speed * 0.7,
+      y: currentPosition.y,
+      z: currentPosition.z
+    };
+    
+    manager.updateCollidablePosition(entityId, xPosition);
+    const xCollisions = manager.checkEntityCollisions(entityId, collisionTypes);
+    manager.updateCollidablePosition(entityId, originalPosition);
+    
+    if (xCollisions.length === 0) {
+      return {
+        success: true,
+        newPosition: xPosition,
+        collision: true,
+        axisOnly: 'x'
+      };
+    }
+    
+    const zPosition = {
+      x: currentPosition.x,
+      y: currentPosition.y,
+      z: currentPosition.z + direction.z * speed * 0.7
+    };
+    
+    manager.updateCollidablePosition(entityId, zPosition);
+    const zCollisions = manager.checkEntityCollisions(entityId, collisionTypes);
+    manager.updateCollidablePosition(entityId, originalPosition);
+    
+    if (zCollisions.length === 0) {
+      return {
+        success: true,
+        newPosition: zPosition,
+        collision: true,
+        axisOnly: 'z'
+      };
+    }
+    
+    // Movimento bloqueado
+    return {
+      success: false,
+      collision: true,
+      escapeDirection: { x: escapeX, z: escapeZ }
+    };
+  };
+
+  /**
+   * Atualiza o estado de colisão de um monstro
+   */
+  exports.updateMonsterCollisionState = function(monsterId, state) {
+    const manager = getCollisionManager();
+    if (state === 'dead') {
+      manager.disableCollisionForEntity(monsterId);
+    } else {
+      manager.enableCollisionForEntity(monsterId);
+    }
+  };
+
+  /**
+   * Verifica ataques em uma área
+   */
+  exports.checkAreaAttack = function(attackerId, position, range, targetTypes) {
+    const manager = getCollisionManager();
+    const hits = [];
+    
+    manager.collidables.forEach(collidable => {
+      if (!collidable.enabled) return;
+      if (collidable.owner && collidable.owner.id === attackerId) return;
+      if (targetTypes && !targetTypes.includes(collidable.type)) return;
+      
+      const dx = collidable.position.x - position.x;
+      const dz = collidable.position.z - position.z;
+      const distSquared = dx * dx + dz * dz;
+      
+      const effectiveRange = range + collidable.getEffectiveRadius();
+      
+      if (distSquared <= (effectiveRange * effectiveRange)) {
+        hits.push({
+          collidable: collidable,
+          entity: collidable.owner,
+          distance: Math.sqrt(distSquared)
+        });
+      }
+    });
+    
+    return hits;
+  };
+
 // Escolher o correto método de exportação baseado no ambiente
 })(typeof exports === 'undefined' ? (this.CollisionSystem = {}) : exports);

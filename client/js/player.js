@@ -302,35 +302,32 @@ class Player {
     }
   }
   
-  // Move player - Simplificado para usar o sistema unificado de colisão
+  // Simplificação da função move em client/js/player.js
   move(direction, speed) {
     if (direction.length() === 0) {
       this.resetLegsPosition();
       return false;
     }
     
-    // Normalize direction
+    // Normalizar direção
     direction.normalize();
     
-    // Posição original
-    const originalPosition = this.mesh.position.clone();
-    
-    // Calcular a nova posição pretendida
-    const targetPosition = originalPosition.clone().add(
-      new THREE.Vector3(direction.x * speed, 0, direction.z * speed)
-    );
-    
-    // NOVO: Verificar colisões com o sistema unificado, obtendo também direção de escape
-    const collisionResult = window.CollisionSystem.collisionManager.checkCollisionWithEscapeDirection(
-      this.id, 
-      { x: targetPosition.x, y: targetPosition.y, z: targetPosition.z },
+    // Usar função centralizada de movimento
+    const moveResult = window.CollisionSystem.moveWithCollision(
+      this.id,
+      this.mesh.position.clone(),
+      { x: direction.x, z: direction.z },
+      speed,
       [window.CollisionSystem.COLLIDABLE_TYPES.STATIC, window.CollisionSystem.COLLIDABLE_TYPES.MONSTER]
     );
     
-    // Se não há colisão, pode mover
-    if (!collisionResult.hasCollision) {
-      this.mesh.position.copy(targetPosition);
-      this.updateCollider();
+    if (moveResult.success) {
+      // Atualizar posição
+      this.mesh.position.set(
+        moveResult.newPosition.x,
+        moveResult.newPosition.y,
+        moveResult.newPosition.z
+      );
       
       // Atualizar rotação
       const angle = Math.atan2(direction.x, direction.z);
@@ -338,98 +335,16 @@ class Player {
       
       // Atualizar última posição válida
       this.lastValidPosition.copy(this.mesh.position);
+      
+      // Animar pernas
       this.animateWalk();
+      
       return true;
+    } else if (moveResult.collision) {
+      // Mostrar feedback de colisão se houver
+      this.showCollisionFeedback();
     }
     
-    // MELHORADO: Tentar movimento com deslizamento em colisões
-    // Usar a direção de escape para determinar como deslizar
-    const escapeDir = collisionResult.escapeDirection;
-    
-    // Calcular componente perpendicular ao movimento (para deslizar)
-    // Produto escalar entre direção e escape = cos(ângulo) * |dir| * |escape|
-    const dotProduct = direction.x * escapeDir.x + direction.z * escapeDir.z;
-    
-    // O vetor projetado na direção de escape
-    const projX = escapeDir.x * dotProduct;
-    const projZ = escapeDir.z * dotProduct;
-    
-    // O vetor de deslizamento é a diferença entre a direção original e sua projeção
-    const slideX = direction.x - projX;
-    const slideZ = direction.z - projZ;
-    
-    // Normalizar o vetor de deslizamento
-    const slideMagnitude = Math.sqrt(slideX * slideX + slideZ * slideZ);
-    
-    // Se o vetor de deslizamento é muito pequeno, tentar movimento parcial em cada eixo
-    if (slideMagnitude < 0.1) {
-      // Tentar movimento parcial em X
-      const canMoveX = !this.checkAnyCollisions(new THREE.Vector3(
-        originalPosition.x + direction.x * speed * 0.7,
-        originalPosition.y,
-        originalPosition.z
-      ));
-      
-      const canMoveZ = !this.checkAnyCollisions(new THREE.Vector3(
-        originalPosition.x,
-        originalPosition.y,
-        originalPosition.z + direction.z * speed * 0.7
-      ));
-      
-      if (canMoveX || canMoveZ) {
-        const partialMove = originalPosition.clone();
-        
-        if (canMoveX) partialMove.x += direction.x * speed * 0.7;
-        if (canMoveZ) partialMove.z += direction.z * speed * 0.7;
-        
-        // Mover para a posição parcial
-        this.mesh.position.copy(partialMove);
-        this.updateCollider();
-        
-        // Atualizar rotação para a direção desejada
-        const angle = Math.atan2(direction.x, direction.z);
-        this.mesh.rotation.y = angle;
-        
-        this.lastValidPosition.copy(this.mesh.position);
-        this.animateWalk();
-        return true;
-      }
-      
-      // Se não pode mover em nenhum eixo, mostrar feedback sutil
-      if (this.isLocal) this.showCollisionFeedback();
-      return false;
-    }
-    
-    // Tentar movimento de deslizamento 
-    const slideDirection = new THREE.Vector3(
-      slideX / slideMagnitude,
-      0,
-      slideZ / slideMagnitude
-    );
-    
-    const slidePosition = originalPosition.clone().add(
-      slideDirection.multiplyScalar(speed * 0.8) // Velocidade reduzida durante deslizamento
-    );
-    
-    // Verificar se o deslizamento causa colisão
-    const canSlide = !this.checkAnyCollisions(slidePosition);
-    
-    if (canSlide) {
-      // Mover com deslizamento
-      this.mesh.position.copy(slidePosition);
-      this.updateCollider();
-      
-      // Atualizar rotação para direção original
-      const angle = Math.atan2(direction.x, direction.z);
-      this.mesh.rotation.y = angle;
-      
-      this.lastValidPosition.copy(this.mesh.position);
-      this.animateWalk();
-      return true;
-    }
-    
-    // Se não foi possível fazer nenhum movimento, mostrar feedback
-    if (this.isLocal) this.showCollisionFeedback();
     return false;
   }
 
@@ -619,31 +534,48 @@ class Player {
   
   // Check for melee attack hits
   checkMeleeAttackHits() {
-    const MELEE_ATTACK_RANGE = 2;
+    // Verificar acertos em jogadores
+    const hits = window.CollisionSystem.checkAreaAttack(
+      this.id,
+      this.mesh.position,
+      window.CollisionSystem.COLLISION_CONSTANTS.MELEE_ATTACK_RANGE,
+      [window.CollisionSystem.COLLIDABLE_TYPES.PLAYER]
+    );
     
-    // Check other players
-    for (const id in players) {
-      if (id === this.id) continue;
-      
-      const target = players[id];
-      const dx = target.mesh.position.x - this.mesh.position.x;
-      const dz = target.mesh.position.z - this.mesh.position.z;
-      const distSq = dx * dx + dz * dz;
-      
-      // If in range, hit target
-      if (distSq <= MELEE_ATTACK_RANGE * MELEE_ATTACK_RANGE) {
-        // Calculate damage based on strength
+    // Processar acertos
+    hits.forEach(hit => {
+      if (hit.entity && hit.entity.id !== this.id) {
+        // Calcular dano baseado em força
         const BASE_DAMAGE = 5;
         const strengthBonus = this.stats.strength * 0.5;
         const damage = Math.floor(BASE_DAMAGE + strengthBonus);
         
-        // Visual feedback
-        target.showDamageEffect();
-        
-        // Show damage number
-        showDamageNumber(target.mesh.position, damage);
+        // Feedback visual
+        hit.entity.showDamageEffect();
+        showDamageNumber(hit.entity.mesh.position, damage);
       }
-    }
+    });
+    
+    // Verificar acertos em monstros
+    const monsterHits = window.CollisionSystem.checkAreaAttack(
+      this.id,
+      this.mesh.position,
+      window.CollisionSystem.COLLISION_CONSTANTS.MELEE_ATTACK_RANGE,
+      [window.CollisionSystem.COLLIDABLE_TYPES.MONSTER]
+    );
+    
+    monsterHits.forEach(hit => {
+      if (hit.entity) {
+        const BASE_DAMAGE = 5;
+        const strengthBonus = this.stats.strength * 0.5;
+        const damage = Math.floor(BASE_DAMAGE + strengthBonus);
+        
+        hit.entity.showDamageEffect();
+        showDamageNumber(hit.entity.mesh.position, damage);
+      }
+    });
+    
+    return hits.length > 0 || monsterHits.length > 0;
   }
 
   checkExhaustion() {
@@ -890,30 +822,6 @@ class Player {
     return this.stats.health <= 0;
   }
 
-  // Animate walking - modificado para sempre animar as pernas quando o player está se movendo
-  animateWalk() {
-    const now = Date.now();
-    
-    // Only update animation every 50ms
-    if (!this.lastWalkTime || now - this.lastWalkTime > 50) {
-      this.walkCycle = (this.walkCycle || 0) + 1;
-      
-      // Simple leg animation
-      const leftLeg = this.parts.legs.left;
-      const rightLeg = this.parts.legs.right;
-      
-      // Certifica que as pernas são visíveis
-      leftLeg.material.opacity = 1;
-      rightLeg.material.opacity = 1;
-      
-      // CORREÇÃO: Aumentar a amplitude da animação para torná-la mais visível
-      const cycle = Math.sin(this.walkCycle * 0.4) * 0.3; // Aumentado de 0.2 para 0.3
-      leftLeg.rotation.x = cycle;
-      rightLeg.rotation.x = -cycle;
-      
-      this.lastWalkTime = now;
-    }
-  }
 }
 
 // Create a new player

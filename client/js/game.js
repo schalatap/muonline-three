@@ -127,147 +127,82 @@ function initTargetIndicator() {
 function onMouseMoveWorld(event) {
   if (!gameStarted || !localPlayer) return;
   
-  // Ignore if mouse is over chat input
+  // Ignorar se o mouse estiver sobre o chat
   if (document.activeElement === document.getElementById('chat-input')) return;
   
-  // Convert mouse coordinates to normalized device coordinates
+  // Configurar raycaster
   const mouse = new THREE.Vector2();
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-  
-  // Update raycaster
   raycaster.setFromCamera(mouse, camera);
   
-  // Primeiro verifica se há monstros sob o cursor
-  const monsterMeshes = [];
-  const monsterIds = [];
+  // Função auxiliar para coletar meshes
+  function collectSelectables(entity, meshes, entities) {
+    if (!entity || !entity.mesh) return;
+    
+    // Adicionar mesh principal
+    meshes.push(entity.mesh);
+    entities.push(entity);
+    
+    // Adicionar partes, se existirem
+    if (entity.parts) {
+      Object.values(entity.parts).forEach(part => {
+        if (!part || typeof part === 'function') return;
+        
+        if (part.isMesh) {
+          meshes.push(part);
+          entities.push(entity);
+        } else if (part.left) {
+          meshes.push(part.left);
+          entities.push(entity);
+        } else if (part.right) {
+          meshes.push(part.right);
+          entities.push(entity);
+        }
+      });
+    }
+  }
   
-  for (const id in monsters) {
-    if (monsters[id].mesh) {
-      monsterMeshes.push(monsters[id].mesh);
-      monsterIds.push(id);
+  // Coletar meshes selecionáveis
+  const selectableMeshes = [];
+  const selectableEntities = [];
+  
+  // Monstros
+  Object.values(monsters).forEach(monster => {
+    collectSelectables(monster, selectableMeshes, selectableEntities);
+  });
+  
+  // Outros jogadores
+  Object.entries(players).forEach(([id, player]) => {
+    if (id !== playerId) {
+      collectSelectables(player, selectableMeshes, selectableEntities);
+    }
+  });
+  
+  // Verificar interseções
+  const intersects = raycaster.intersectObjects(selectableMeshes, true);
+  
+  if (intersects.length > 0) {
+    const intersectedObject = intersects[0].object;
+    
+    // Encontrar entidade correspondente
+    for (let i = 0; i < selectableMeshes.length; i++) {
+      const mesh = selectableMeshes[i];
       
-      // Adiciona também todas as partes do monstro para melhorar a detecção
-      if (monsters[id].parts) {
-        if (monsters[id].parts.body) {
-          monsterMeshes.push(monsters[id].parts.body);
-          monsterIds.push(id);
-        }
-        if (monsters[id].parts.head) {
-          monsterMeshes.push(monsters[id].parts.head);
-          monsterIds.push(id);
-        }
-        if (monsters[id].parts.legs) {
-          if (monsters[id].parts.legs.left) {
-            monsterMeshes.push(monsters[id].parts.legs.left);
-            monsterIds.push(id);
-          }
-          if (monsters[id].parts.legs.right) {
-            monsterMeshes.push(monsters[id].parts.legs.right);
-            monsterIds.push(id);
-          }
-        }
+      if (mesh === intersectedObject || 
+          (mesh.children && mesh.children.includes(intersectedObject))) {
+        updateTargetIndicator(selectableEntities[i]);
+        selectedTarget = selectableEntities[i];
+        return;
       }
     }
   }
   
-  let intersects = raycaster.intersectObjects(monsterMeshes, true);
-  
-  if (intersects.length > 0) {
-    // Encontrou um monstro sob o cursor
-    const intersectedObject = intersects[0].object;
-    let foundMonster = false;
-    
-    // Tenta encontrar o monstro dono desta mesh
-    for (let i = 0; i < monsterMeshes.length; i++) {
-      if (monsterMeshes[i] === intersectedObject || 
-          (monsterMeshes[i].children && monsterMeshes[i].children.includes(intersectedObject))) {
-        const monsterId = monsterIds[i];
-        const targetMonster = monsters[monsterId];
-        
-        if (targetMonster) {
-          updateTargetIndicator(targetMonster);
-          selectedTarget = targetMonster;
-          foundMonster = true;
-          break;
-        }
-      }
-    }
-    
-    if (foundMonster) return;
-  }
-  
-  // Se não encontrou monstro, verifica jogadores
-  const playerMeshes = [];
-  const playerIds = [];
-  
-  for (const id in players) {
-    if (id === playerId) continue; // Skip local player
-    playerMeshes.push(players[id].mesh);
-    playerIds.push(id);
-    
-    // Adiciona também todas as partes do jogador para melhorar a detecção
-    if (players[id].parts) {
-      if (players[id].parts.body) {
-        playerMeshes.push(players[id].parts.body);
-        playerIds.push(id);
-      }
-      if (players[id].parts.head) {
-        playerMeshes.push(players[id].parts.head);
-        playerIds.push(id);
-      }
-      if (players[id].parts.arms) {
-        if (players[id].parts.arms.left) {
-          playerMeshes.push(players[id].parts.arms.left);
-          playerIds.push(id);
-        }
-        if (players[id].parts.arms.right) {
-          playerMeshes.push(players[id].parts.arms.right);
-          playerIds.push(id);
-        }
-      }
-      if (players[id].parts.legs) {
-        if (players[id].parts.legs.left) {
-          playerMeshes.push(players[id].parts.legs.left);
-          playerIds.push(id);
-        }
-        if (players[id].parts.legs.right) {
-          playerMeshes.push(players[id].parts.legs.right);
-          playerIds.push(id);
-        }
-      }
-    }
-  }
-  
-  intersects = raycaster.intersectObjects(playerMeshes, true);
-  
-  if (intersects.length > 0) {
-    // Found a player under cursor - highlight them
-    const intersectedObject = intersects[0].object;
-    let foundPlayer = false;
-    
-    for (let i = 0; i < playerMeshes.length; i++) {
-      if (playerMeshes[i] === intersectedObject || 
-          (playerMeshes[i].children && playerMeshes[i].children.includes(intersectedObject))) {
-        const targetId = playerIds[i];
-        
-        if (players[targetId]) {
-          updateTargetIndicator(players[targetId]);
-          selectedTarget = players[targetId];
-          foundPlayer = true;
-          break;
-        }
-      }
-    }
-    
-    if (foundPlayer) return;
-  }
-  
-  // If no player or monster under cursor, find intersection with ground
+  // Se não houver interseção com entidades, verificar o chão
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   raycaster.ray.intersectPlane(groundPlane, worldMousePosition);
   
-  // Hide target indicator
+  // Esconder indicador
   hideTargetIndicator();
   selectedTarget = null;
 }
