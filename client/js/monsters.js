@@ -514,15 +514,6 @@ function updateMonsterColliders() {
       
       // Manter o radius para referência
       monster.radius = monster.type === 'GOBLIN' ? 0.6 : 0.7;
-      
-      // Ainda mantemos uma referência ao collider para compatibilidade
-      const pos = monster.mesh.position;
-      const monsterSize = monster.radius;
-      
-      monster.collider = new THREE.Box3(
-        new THREE.Vector3(pos.x - monsterSize * 0.6, pos.y, pos.z - monsterSize * 0.6),
-        new THREE.Vector3(pos.x + monsterSize * 0.6, pos.y + monsterSize * 2.0, pos.z + monsterSize * 0.6)
-      );
     }
   }
 }

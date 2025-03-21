@@ -595,31 +595,29 @@ function updateProjectiles() {
 }
 
 // Função auxiliar para obter todos os colliders ativos
+// Simplificada para usar apenas o sistema unificado
 function getAllColliders() {
-  // Verificar se o sistema de colisão está disponível
   if (window.CollisionSystem && window.CollisionSystem.collisionManager) {
-    // Obter todos os colliders do sistema unificado
     return window.CollisionSystem.collisionManager.getActiveColliderBoxes();
   }
-  
-  console.warn("Sistema de colisão não está disponível. Retornando lista vazia.");
   return [];
 }
 
-// Update local player based on inputs - Função corrigida
+// Update local player based on inputs - Simplificada
 function updateLocalPlayer() {
   const moveDirection = getMovementDirection();
   
   if (moveDirection.length() > 0) {
-    // Try to move player, respecting collisions
+    // Tenta mover o jogador, respeitando colisões
     const SPEED = localPlayer.moveSpeed || 0.15;
     
     // Verificar se o player existe e tem método move
     if (localPlayer && typeof localPlayer.move === 'function') {
-      const moved = localPlayer.move(moveDirection, SPEED, getAllColliders());
+      // Move usa apenas o sistema unificado internamente
+      const moved = localPlayer.move(moveDirection, SPEED);
       
       if (moved) {
-        // Send update to server
+        // Enviar atualização para o servidor
         sendPlayerMove({
           position: {
             x: localPlayer.mesh.position.x,
@@ -630,22 +628,6 @@ function updateLocalPlayer() {
             y: localPlayer.mesh.rotation.y
           }
         });
-      } else {
-        // Verificar escape de colisão
-        const escaped = localPlayer.escapeCollision(getAllColliders());
-        
-        if (escaped) {
-          sendPlayerMove({
-            position: {
-              x: localPlayer.mesh.position.x,
-              y: localPlayer.mesh.position.y,
-              z: localPlayer.mesh.position.z
-            },
-            rotation: {
-              y: localPlayer.mesh.rotation.y
-            }
-          });
-        }
       }
     } else {
       console.error("Player não está disponível ou não tem método move");

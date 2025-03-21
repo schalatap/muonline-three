@@ -359,7 +359,6 @@ class GameWorld {
   
   // Retorna a lista de colliders
   getColliders() {
-    // Usar o novo sistema
     if (window.CollisionSystem && window.CollisionSystem.collisionManager) {
       return window.CollisionSystem.collisionManager.getActiveColliderBoxes();
     }
