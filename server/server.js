@@ -7,6 +7,9 @@ const { handlePlayerConnection } = require('./game');
 // Importe o sistema de colisão unificado
 const CollisionSystem = require('../shared/collision');
 
+// Importe o módulo world e inicialize obstáculos
+const { initializeWorldObstacles, debugObstacles } = require('./world');
+
 // Configuração do Express
 const app = express();
 const server = http.createServer(app);
@@ -94,6 +97,15 @@ io.on('connection', (socket) => {
     console.error(`Erro no socket ${socket.id}:`, err);
   });
 });
+
+// IMPORTANTE: Inicializar obstáculos do mundo antes de iniciar o servidor
+console.log("Iniciando sistema de colisão e obstáculos do mundo...");
+initializeWorldObstacles();
+
+// Log de debug para verificar obstáculos
+const obstacleStats = debugObstacles();
+console.log(`Total de obstáculos definidos: ${obstacleStats.definedObstacles}`);
+console.log(`Total de collidables estáticos registrados: ${obstacleStats.registeredCollidables}`);
 
 // Captura erros no servidor
 server.on('error', (err) => {
