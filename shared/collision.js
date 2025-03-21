@@ -25,11 +25,27 @@
       this.type = type;
       this.shape = shape;
       this.position = options.position || { x: 0, y: 0, z: 0 };
-      this.dimensions = options.dimensions || { width: 1, height: 1, depth: 1 };
-      this.radius = options.radius || 0.5;
+    
+      // Adicionar buffer de segurança aos colliders
+      const safetyBuffer = 0.05; // 5cm de segurança
+      
+      if (shape === COLLIDER_SHAPES.BOX) {
+        this.dimensions = {
+          width: (options.dimensions?.width || 1) + safetyBuffer,
+          height: (options.dimensions?.height || 1) + safetyBuffer,
+          depth: (options.dimensions?.depth || 1) + safetyBuffer
+        };
+      } else {
+        this.dimensions = options.dimensions || { width: 1, height: 1, depth: 1 };
+      }
+      
+      // Adicionar buffer ao raio para shapes circulares
+      this.radius = (options.radius || 0.5) + (shape === COLLIDER_SHAPES.SPHERE || 
+                                              shape === COLLIDER_SHAPES.CYLINDER ? safetyBuffer : 0);
+      
       this.enabled = options.enabled !== undefined ? options.enabled : true;
-      this.owner = options.owner || null; // Referência ao objeto que possui este collidable
-    }
+      this.owner = options.owner || null;
+  }
   
     // Ativa/desativa a colisão
     setEnabled(enabled) {
@@ -194,7 +210,10 @@
       const dz = closestPoint.z - sphere.position.z;
       const distSq = dx * dx + dy * dy + dz * dz;
       
-      return distSq < (sphere.radius * sphere.radius);
+      // Adicionar um fator de segurança extra (5%)
+      const radiusSq = sphere.radius * sphere.radius * 1.05;
+      
+      return distSq < radiusSq;
     }
   
     // Verifica colisão entre duas caixas
@@ -338,8 +357,8 @@
       COLLIDABLE_TYPES.PLAYER,
       COLLIDER_SHAPES.BOX,
       {
-        position: { ...(player.mesh ? player.mesh.position : player.position) },
-        dimensions: { width: 1, height: 1.8, depth: 1 },
+        position: { ...(player.mesh ? player.mesh.position : player.position), y: (player.mesh ? player.mesh.position.y : player.position.y) + 0.9 },
+        dimensions: { width: 1, height: 1.8, depth: 0.6 },
         owner: player
       }
     ));
@@ -353,8 +372,11 @@
       COLLIDABLE_TYPES.MONSTER,
       COLLIDER_SHAPES.BOX,
       {
-        position: { ...(monster.mesh ? monster.mesh.position : monster.position) },
-        dimensions: { width: radius * 2, height: 2.0, depth: radius * 2 },
+        position: { 
+          ...(monster.mesh ? monster.mesh.position : monster.position),
+          y: (monster.mesh ? monster.mesh.position.y : monster.position.y) + 0.6 // CORREÇÃO: Ajuste da altura
+        },
+        dimensions: { width: radius * 2, height: 1.2, depth: radius * 2 }, // CORREÇÃO: Altura ajustada para 1.2
         owner: monster
       }
     ));

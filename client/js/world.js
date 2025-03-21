@@ -48,6 +48,7 @@ class GameWorld {
     const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x7cac55 });
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -0.01; // Rebaixa o chão
     ground.receiveShadow = true;
     scene.add(ground);
     
