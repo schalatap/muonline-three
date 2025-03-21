@@ -85,7 +85,15 @@ const MonsterTypes = {
     };
     
     // Registrar collidable do monstro no servidor
-    createMonsterCollidable(monster);
+    try {
+      if (typeof createMonsterCollidable === 'function') {
+        monster.collider = createMonsterCollidable(monster);
+      } else {
+        console.warn(`Função createMonsterCollidable não disponível para o monstro ${monster.id}`);
+      }
+    } catch (error) {
+      console.error(`Erro ao criar collidable para monstro ${monster.id}:`, error);
+    }
     
     return monster;
   }

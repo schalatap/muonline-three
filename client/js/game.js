@@ -70,19 +70,26 @@ function init() {
 function initCollisionSystem() {
   console.log("Inicializando sistema de colisão unificado");
   
-  // Garantir que o sistema está disponível
-  if (!window.CollisionSystem) {
-    console.error("Sistema de colisão não encontrado. Verifique se collision.js foi carregado corretamente.");
+  // Verificar se o script collision.js foi carregado
+  if (typeof window.CollisionSystem === 'undefined') {
+    console.error("ERRO CRÍTICO: Sistema de colisão não encontrado. Verifique se collision.js foi carregado corretamente.");
+    // Exibir mensagem ao usuário
+    const errorMsg = document.createElement('div');
+    errorMsg.style.position = 'absolute';
+    errorMsg.style.top = '10px';
+    errorMsg.style.left = '10px';
+    errorMsg.style.color = 'red';
+    errorMsg.style.background = 'black';
+    errorMsg.style.padding = '10px';
+    errorMsg.style.zIndex = '9999';
+    errorMsg.textContent = 'Erro ao carregar sistema de colisão. Recarregue a página ou contate o suporte.';
+    document.body.appendChild(errorMsg);
     return;
   }
   
-  // Verificar se o gerenciador de colisões já existe antes de criar um novo
-  if (!window.CollisionSystem.collisionManager) {
-    console.log("Criando novo gerenciador de colisões");
-    window.CollisionSystem.collisionManager = new window.CollisionSystem.CollisionManager();
-  } else {
-    console.log("Usando gerenciador de colisões existente");
-  }
+  // Usar o método unificado para obter o gerenciador de colisões
+  window.CollisionSystem.collisionManager = window.CollisionSystem.getCollisionManager();
+  console.log("Sistema de colisão inicializado com sucesso");
 }
 
 // Create experience bar
@@ -603,7 +610,7 @@ function getAllColliders() {
   return [];
 }
 
-// Update local player based on inputs - Simplificada
+// Update local player based on inputs
 function updateLocalPlayer() {
   const moveDirection = getMovementDirection();
   
@@ -632,9 +639,12 @@ function updateLocalPlayer() {
     } else {
       console.error("Player não está disponível ou não tem método move");
     }
+  } else if (localPlayer && typeof localPlayer.resetLegsPosition === 'function') {
+    // Se não estiver se movendo, resetar animação das pernas
+    localPlayer.resetLegsPosition();
   }
   
-  // Check for melee attacks
+  // Check for melee attacks - MANTER ESTE TRECHO
   if (isAttacking() && !localPlayer.isAttacking) {
     // Check if we have enough stamina
     const STAMINA_COST = 10;

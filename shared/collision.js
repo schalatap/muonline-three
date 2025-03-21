@@ -18,6 +18,26 @@
     CYLINDER: 'cylinder'
   };
   
+  // Constantes de segurança - centralizar para evitar inconsistências
+  const SAFETY_BUFFER = 0.05; // 5cm de segurança
+  const SAFETY_FACTOR = 1.05; // Fator de segurança de 5%
+
+  // Funções utilitárias para cálculos de colisão
+  const CollisionUtils = {
+    // Calcula o quadrado da distância entre dois pontos no espaço 3D
+    distanceSquared: (posA, posB) => {
+      const dx = posB.x - posA.x;
+      const dy = posB.y - posA.y;
+      const dz = posB.z - posA.z;
+      return dx * dx + dy * dy + dz * dz;
+    },
+
+    // Verifica se dois intervalos 1D se sobrepõem
+    intervalsOverlap: (minA, maxA, minB, maxB) => {
+      return !(maxA < minB || minA > maxB);
+    }
+  };
+  
   // Representação unificada de um objeto com colisão
   class Collidable {
     constructor(id, type, shape, options = {}) {
@@ -26,26 +46,24 @@
       this.shape = shape;
       this.position = options.position || { x: 0, y: 0, z: 0 };
     
-      // Adicionar buffer de segurança aos colliders
-      const safetyBuffer = 0.05; // 5cm de segurança
-      
       if (shape === COLLIDER_SHAPES.BOX) {
         this.dimensions = {
-          width: (options.dimensions?.width || 1) + safetyBuffer,
-          height: (options.dimensions?.height || 1) + safetyBuffer,
-          depth: (options.dimensions?.depth || 1) + safetyBuffer
+          width: (options.dimensions?.width || 1) + SAFETY_BUFFER,
+          height: (options.dimensions?.height || 1) + SAFETY_BUFFER,
+          depth: (options.dimensions?.depth || 1) + SAFETY_BUFFER
         };
       } else {
         this.dimensions = options.dimensions || { width: 1, height: 1, depth: 1 };
       }
       
       // Adicionar buffer ao raio para shapes circulares
-      this.radius = (options.radius || 0.5) + (shape === COLLIDER_SHAPES.SPHERE || 
-                                              shape === COLLIDER_SHAPES.CYLINDER ? safetyBuffer : 0);
+      this.radius = (options.radius || 0.5) + 
+                   (shape === COLLIDER_SHAPES.SPHERE || shape === COLLIDER_SHAPES.CYLINDER ? 
+                    SAFETY_BUFFER : 0);
       
       this.enabled = options.enabled !== undefined ? options.enabled : true;
       this.owner = options.owner || null;
-  }
+    }
   
     // Ativa/desativa a colisão
     setEnabled(enabled) {
@@ -182,10 +200,7 @@
   
     // Verifica colisão entre duas esferas
     checkSphereSphereCollision(sphereA, sphereB) {
-      const dx = sphereB.position.x - sphereA.position.x;
-      const dy = sphereB.position.y - sphereA.position.y;
-      const dz = sphereB.position.z - sphereA.position.z;
-      const distSq = dx * dx + dy * dy + dz * dz;
+      const distSq = CollisionUtils.distanceSquared(sphereA.position, sphereB.position);
       const minDistSq = (sphereA.radius + sphereB.radius) * (sphereA.radius + sphereB.radius);
       
       return distSq < minDistSq;
@@ -205,13 +220,10 @@
       };
       
       // Calcular a distância ao quadrado entre o centro da esfera e o ponto mais próximo
-      const dx = closestPoint.x - sphere.position.x;
-      const dy = closestPoint.y - sphere.position.y;
-      const dz = closestPoint.z - sphere.position.z;
-      const distSq = dx * dx + dy * dy + dz * dz;
+      const distSq = CollisionUtils.distanceSquared(sphere.position, closestPoint);
       
-      // Adicionar um fator de segurança extra (5%)
-      const radiusSq = sphere.radius * sphere.radius * 1.05;
+      // Usar o fator de segurança padronizado
+      const radiusSq = sphere.radius * sphere.radius * SAFETY_FACTOR;
       
       return distSq < radiusSq;
     }
@@ -232,71 +244,64 @@
       const bMinZ = boxB.position.z - boxB.dimensions.depth / 2;
       const bMaxZ = boxB.position.z + boxB.dimensions.depth / 2;
       
-      return !(
-        aMaxX < bMinX || aMinX > bMaxX ||
-        aMaxY < bMinY || aMinY > bMaxY ||
-        aMaxZ < bMinZ || aMinZ > bMaxZ
+      return (
+        CollisionUtils.intervalsOverlap(aMinX, aMaxX, bMinX, bMaxX) &&
+        CollisionUtils.intervalsOverlap(aMinY, aMaxY, bMinY, bMaxY) &&
+        CollisionUtils.intervalsOverlap(aMinZ, aMaxZ, bMinZ, bMaxZ)
       );
     }
   
-    // Verifica colisão com um cilindro
+    // Verifica colisão com um cilindro (simplificada e aprimorada)
     checkCylinderCollision(cylinder, other) {
-      // Simplificação: tratamos um cilindro como um círculo no plano XZ
+      // Primeiro verificamos colisão no plano XZ (tratando como círculo)
+      let isXZCollision = false;
+      let radiusSum = 0;
+      
       if (other.shape === COLLIDER_SHAPES.SPHERE) {
-        const dx = other.position.x - cylinder.position.x;
-        const dz = other.position.z - cylinder.position.z;
-        const distSq = dx * dx + dz * dz;
-        
-        // Verificar se estamos dentro do raio combinado
-        const combinedRadius = cylinder.radius + other.radius;
-        if (distSq > combinedRadius * combinedRadius) {
-          return false;
-        }
-        
-        // Verificar altura
-        const otherBottom = other.position.y;
-        const otherTop = other.shape === COLLIDER_SHAPES.SPHERE 
-          ? other.position.y + other.radius
-          : other.position.y + other.dimensions.height;
-        
-        const cylinderBottom = cylinder.position.y;
-        const cylinderTop = cylinder.position.y + cylinder.dimensions.height;
-        
-        return !(otherTop < cylinderBottom || otherBottom > cylinderTop);
-      } else if (other.shape === COLLIDER_SHAPES.BOX) {
-        // Aproximação simplificada para caixa-cilindro
-        // Projetamos no plano XZ e verificamos se o cilindro (tratado como círculo) intersecta o retângulo
+        radiusSum = cylinder.radius + other.radius;
+        // Ignorando componente Y para comparação XZ
+        const posA = { x: cylinder.position.x, y: 0, z: cylinder.position.z };
+        const posB = { x: other.position.x, y: 0, z: other.position.z };
+        isXZCollision = CollisionUtils.distanceSquared(posA, posB) < (radiusSum * radiusSum);
+      } 
+      else if (other.shape === COLLIDER_SHAPES.BOX) {
+        // Encontrar o ponto mais próximo do cilindro dentro da caixa no plano XZ
         const halfWidth = other.dimensions.width / 2;
         const halfDepth = other.dimensions.depth / 2;
         
-        // Encontrar o ponto mais próximo do cilindro dentro do retângulo (no plano XZ)
-        const closestX = Math.max(other.position.x - halfWidth, Math.min(cylinder.position.x, other.position.x + halfWidth));
-        const closestZ = Math.max(other.position.z - halfDepth, Math.min(cylinder.position.z, other.position.z + halfDepth));
+        const closestX = Math.max(other.position.x - halfWidth, 
+                          Math.min(cylinder.position.x, other.position.x + halfWidth));
+        const closestZ = Math.max(other.position.z - halfDepth, 
+                          Math.min(cylinder.position.z, other.position.z + halfDepth));
         
-        // Calcular distância ao quadrado entre o centro do cilindro e o ponto mais próximo
-        const dx = closestX - cylinder.position.x;
-        const dz = closestZ - cylinder.position.z;
-        const distSq = dx * dx + dz * dz;
-        
-        if (distSq > cylinder.radius * cylinder.radius) {
-          return false;
-        }
-        
-        // Verificar altura
-        const otherBottom = other.position.y;
-        const otherTop = other.position.y + other.dimensions.height;
-        
-        const cylinderBottom = cylinder.position.y;
-        const cylinderTop = cylinder.position.y + cylinder.dimensions.height;
-        
-        return !(otherTop < cylinderBottom || otherBottom > cylinderTop);
+        // Verificar se o ponto está dentro do raio do cilindro
+        const posA = { x: cylinder.position.x, y: 0, z: cylinder.position.z };
+        const posB = { x: closestX, y: 0, z: closestZ };
+        isXZCollision = CollisionUtils.distanceSquared(posA, posB) < (cylinder.radius * cylinder.radius);
       }
       
-      return false;
+      // Se não houver colisão no plano XZ, não há colisão no 3D
+      if (!isXZCollision) return false;
+      
+      // Verificar colisão na altura (eixo Y)
+      const cylinderBottom = cylinder.position.y;
+      const cylinderTop = cylinder.position.y + cylinder.dimensions.height;
+      
+      let otherBottom, otherTop;
+      
+      if (other.shape === COLLIDER_SHAPES.SPHERE) {
+        otherBottom = other.position.y - other.radius;
+        otherTop = other.position.y + other.radius;
+      } else {
+        otherBottom = other.position.y;
+        otherTop = other.position.y + other.dimensions.height;
+      }
+      
+      return CollisionUtils.intervalsOverlap(cylinderBottom, cylinderTop, otherBottom, otherTop);
     }
   
     // Verifica colisão de uma entidade contra todas as outras
-    checkEntityCollisions(entityId, includeTypes = null) {
+    checkEntityCollisions(entityId, includeTypes = null, excludeTypes = null) {
       const collidable = this.getCollidableByEntityId(entityId);
       if (!collidable || !collidable.enabled) return [];
       
@@ -306,8 +311,11 @@
         // Não verificar colisão consigo mesmo
         if (other.id === collidable.id || !other.enabled) return;
         
-        // Filtrar por tipos, se necessário
+        // Filtrar por tipos para incluir, se necessário
         if (includeTypes && !includeTypes.includes(other.type)) return;
+        
+        // Filtrar por tipos para excluir, se necessário
+        if (excludeTypes && excludeTypes.includes(other.type)) return;
         
         if (this.checkCollision(collidable, other)) {
           collisions.push({
@@ -349,16 +357,42 @@
   // Gerenciador de colisão global
   let sharedCollisionManager = null;
   
+  // Funções utilitárias para criar collidables
+  
+  // Função para extrair a posição, independente se é um objeto mesh ou position direta
+  function getEntityPosition(entity) {
+    if (!entity) return { x: 0, y: 0, z: 0 };
+    
+    if (entity.mesh && entity.mesh.position) {
+      return entity.mesh.position;
+    }
+    
+    if (entity.position) {
+      return entity.position;
+    }
+    
+    if (entity.x !== undefined && entity.z !== undefined) {
+      return {
+        x: entity.x, 
+        y: entity.y || 0, 
+        z: entity.z
+      };
+    }
+    
+    return { x: 0, y: 0, z: 0 };
+  }
+  
   // Função para criar um collidable para um jogador
   function createPlayerCollidable(player) {
     console.log(`Criando collidable para jogador ${player.id}`);
+    const position = getEntityPosition(player);
     return getCollisionManager().register(new Collidable(
-      player.id, // Usando diretamente o ID do jogador
+      player.id,
       COLLIDABLE_TYPES.PLAYER,
       COLLIDER_SHAPES.BOX,
       {
-        position: { ...(player.mesh ? player.mesh.position : player.position), y: (player.mesh ? player.mesh.position.y : player.position.y) + 0.9 },
-        dimensions: { width: 1, height: 1.8, depth: 0.6 },
+        position: { ...position, y: position.y + 0.9 },
+        dimensions: { width: 1.1, height: 1.8, depth: 0.7 },
         owner: player
       }
     ));
@@ -366,17 +400,15 @@
   
   // Função para criar um collidable para um monstro
   function createMonsterCollidable(monster) {
-    const radius = monster.type === 'GOBLIN' ? 0.6 : 0.7;
+    const radius = monster.type === 'GOBLIN' ? 0.7 : 0.8;
+    const position = getEntityPosition(monster);
     return getCollisionManager().register(new Collidable(
       monster.id,
       COLLIDABLE_TYPES.MONSTER,
       COLLIDER_SHAPES.BOX,
       {
-        position: { 
-          ...(monster.mesh ? monster.mesh.position : monster.position),
-          y: (monster.mesh ? monster.mesh.position.y : monster.position.y) + 0.6 // CORREÇÃO: Ajuste da altura
-        },
-        dimensions: { width: radius * 2, height: 1.2, depth: radius * 2 }, // CORREÇÃO: Altura ajustada para 1.2
+        position: { ...position, y: position.y + 0.6 },
+        dimensions: { width: radius * 2.2, height: 1.3, depth: radius * 2.2 },
         owner: monster
       }
     ));
@@ -428,6 +460,33 @@
   exports.createStaticCollidable = createStaticCollidable;
   exports.getCollisionManager = getCollisionManager;
   exports.collisionManager = getCollisionManager();
+
+  // Adicionar métodos de utilidade para verificar se o sistema está pronto
+  exports.isCollisionSystemReady = function() {
+    return sharedCollisionManager !== null;
+  };
+
+  // Método para registrar um collidable com verificação de duplicata
+  exports.registerCollidableSafely = function(collidable) {
+    const manager = getCollisionManager();
+    const existingCollidable = manager.getCollidableByEntityId(collidable.owner?.id);
+    
+    if (existingCollidable) {
+      console.log(`Collidable já existe para entidade ${collidable.owner.id} - atualizando`);
+      existingCollidable.updatePosition(collidable.position);
+      return existingCollidable;
+    }
+    
+    return manager.register(collidable);
+  };
+
+  // Método para limpar todos os collidables (útil para reiniciar o sistema)
+  exports.clearAllCollidables = function() {
+    const manager = getCollisionManager();
+    manager.collidables.clear();
+    manager.entityToCollidableMap.clear();
+    return true;
+  };
 
 // Escolher o correto método de exportação baseado no ambiente
 })(typeof exports === 'undefined' ? (this.CollisionSystem = {}) : exports);

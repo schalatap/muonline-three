@@ -388,11 +388,19 @@ function createMonster(monsterData) {
   
   // Registrar o collidable do monstro
   if (monster.mesh) {
-    window.CollisionSystem.createMonsterCollidable(monster);
-    
-    // Importante: se o monstro estiver morto, desabilitar sua colisão
-    if (monster.state === 'dead') {
-      window.CollisionSystem.collisionManager.disableCollisionForEntity(monster.id);
+    if (window.CollisionSystem && window.CollisionSystem.createMonsterCollidable) {
+      try {
+        window.CollisionSystem.createMonsterCollidable(monster);
+        
+        // Importante: se o monstro estiver morto, desabilitar sua colisão
+        if (monster.state === 'dead') {
+          window.CollisionSystem.collisionManager.disableCollisionForEntity(monster.id);
+        }
+      } catch (error) {
+        console.error(`Erro ao criar collider para monstro ${monster.id}:`, error);
+      }
+    } else {
+      console.warn("Sistema de colisão não disponível ao criar monstro:", monster.id);
     }
   }
   
@@ -405,7 +413,13 @@ function removeMonster(id) {
     if (DEBUG_MONSTERS) console.log("Removendo monstro:", id);
     
     // Remover o collidable do gerenciador
-    window.CollisionSystem.collisionManager.disableCollisionForEntity(id);
+    if (window.CollisionSystem && window.CollisionSystem.collisionManager) {
+      try {
+        window.CollisionSystem.collisionManager.disableCollisionForEntity(id);
+      } catch (error) {
+        console.warn(`Erro ao desabilitar collider do monstro ${id}:`, error);
+      }
+    }
     
     monsters[id].destroy();
     delete monsters[id];
@@ -506,14 +520,29 @@ function debugMonster(id) {
 
 // Atualiza o collider do monstro
 function updateMonsterColliders() {
+  if (!window.CollisionSystem || !window.CollisionSystem.collisionManager) {
+    return; // Sistema de colisão não disponível
+  }
+  
   for (const id in monsters) {
     const monster = monsters[id];
     if (monster.mesh) {
-      // Atualizar a posição do collidable no gerenciador unificado
-      window.CollisionSystem.collisionManager.updateCollidablePosition(monster.id, monster.mesh.position);
+      try {
+        // Atualizar a posição do collidable no gerenciador unificado
+        window.CollisionSystem.collisionManager.updateCollidablePosition(monster.id, monster.mesh.position);
+        
+        // Se o monstro estiver morto, garantir que o collider esteja desativado
+        if (monster.state === 'dead') {
+          window.CollisionSystem.collisionManager.disableCollisionForEntity(monster.id);
+        } else {
+          window.CollisionSystem.collisionManager.enableCollisionForEntity(monster.id);
+        }
+      } catch (error) {
+        console.warn(`Erro ao atualizar collider do monstro ${monster.id}:`, error);
+      }
       
-      // Manter o radius para referência
-      monster.radius = monster.type === 'GOBLIN' ? 0.6 : 0.7;
+      // Raio ajustado para collider
+      monster.radius = monster.type === 'GOBLIN' ? 0.7 : 0.8;
     }
   }
 }

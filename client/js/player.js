@@ -261,227 +261,20 @@ class Player {
     
     // Atualiza a posição no sistema de colisão unificado
     if (window.CollisionSystem && window.CollisionSystem.collisionManager) {
-      // Verifica se o collidable do jogador existe
-      const collidable = window.CollisionSystem.collisionManager.getCollidableByEntityId(this.id);
-      
-      if (collidable) {
-        window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, pos);
-      } else {
-        console.warn(`Collidable não encontrado para o jogador ${this.id}. Criando novo collidable.`);
-        // Se não existe, criar um novo collidable
-        window.CollisionSystem.createPlayerCollidable(this);
-      }
-    }
-  }
-  
-  // Move player - Modificado para resetar as pernas quando não está se movendo
-  move(direction, speed) {
-    if (direction.length() === 0) {
-      this.resetLegsPosition();
-      return false;
-    }
-    
-    // Normalize direction
-    direction.normalize();
-    
-    // Posição original
-    const originalPosition = this.mesh.position.clone();
-    
-    // NOVA IMPLEMENTAÇÃO: Teste de movimento com raycasting preventivo
-    // Calcular a posição pretendida
-    const targetPosition = originalPosition.clone().add(
-      new THREE.Vector3(direction.x * speed, 0, direction.z * speed)
-    );
-    
-    // Verificar se haverá colisão no caminho
-    const rayDirection = new THREE.Vector3(
-      targetPosition.x - originalPosition.x,
-      targetPosition.y - originalPosition.y,
-      targetPosition.z - originalPosition.z
-    );
-    const distance = rayDirection.length();
-    rayDirection.normalize();
-    
-    // Raycasting para cada objeto estático e monstro
-    const willCollide = this.checkRaycastCollisions(originalPosition, rayDirection, distance * 1.1);
-    
-    if (willCollide) {
-      // Tentar movimento separado em X e Z com distância reduzida
-      let canMoveX = true;
-      let canMoveZ = true;
-      
-      // Posições de teste com 80% da distância para evitar tunelamento
-      const safeDistance = speed * 0.8;
-      
-      // Teste em X
-      const testX = originalPosition.clone();
-      testX.x += direction.x * safeDistance;
-      if (this.checkPointCollisions(testX)) {
-        canMoveX = false;
-      }
-      
-      // Teste em Z
-      const testZ = originalPosition.clone();
-      testZ.z += direction.z * safeDistance;
-      if (this.checkPointCollisions(testZ)) {
-        canMoveZ = false;
-      }
-      
-      // Aplicar movimento apenas nos eixos permitidos
-      const newPosition = originalPosition.clone();
-      if (canMoveX) newPosition.x += direction.x * safeDistance;
-      if (canMoveZ) newPosition.z += direction.z * safeDistance;
-      
-      // Verificar se a nova posição é diferente da original
-      if (newPosition.equals(originalPosition)) {
-        // Nenhum movimento possível, mostrar feedback
-        if (this.isLocal) this.showCollisionFeedback();
-        return false;
-      }
-      
-      // Aplicar o movimento parcial
-      this.mesh.position.copy(newPosition);
-      window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
-      
-      // Atualizar direção e animação
-      const moveDirection = new THREE.Vector3(
-        newPosition.x - originalPosition.x,
-        0,
-        newPosition.z - originalPosition.z
-      );
-      if (moveDirection.length() > 0) {
-        const angle = Math.atan2(moveDirection.x, moveDirection.z);
-        this.mesh.rotation.y = angle;
-      } else {
-        // Usa a direção original se não houver movimento efetivo
-        const angle = Math.atan2(direction.x, direction.z);
-        this.mesh.rotation.y = angle;
-      }
-      
-      this.lastValidPosition.copy(this.mesh.position);
-      this.animateWalk();
-      return true;
-    } else {
-      // Sem colisão prevista, pode mover normalmente
-      this.mesh.position.copy(targetPosition);
-      window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
-      
-      // Atualizar rotação
-      const angle = Math.atan2(direction.x, direction.z);
-      this.mesh.rotation.y = angle;
-      
-      this.lastValidPosition.copy(this.mesh.position);
-      this.animateWalk();
-      return true;
-    }
-  }
-  
-  // Novos métodos auxiliares para verificação de colisão
-  checkRaycastCollisions(origin, direction, distance) {
-    // Simular raycasting verificando colisões em pontos intermediários
-    const steps = 5; // Verificar em 5 pontos ao longo do caminho
-    const stepSize = distance / steps;
-    
-    for (let i = 1; i <= steps; i++) {
-      const point = origin.clone().add(
-        direction.clone().multiplyScalar(stepSize * i)
-      );
-      
-      if (this.checkPointCollisions(point)) {
-        return true;
-      }
-    }
-    
-    return false;
-  }
-  
-  checkPointCollisions(point) {
-    // Salvar posição atual
-    const currentPosition = this.mesh.position.clone();
-    
-    // Mover temporariamente para testar colisões
-    this.mesh.position.copy(point);
-    window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
-    
-    // Verificar colisões
-    const collisions = window.CollisionSystem.collisionManager.checkEntityCollisions(
-      this.id, 
-      [window.CollisionSystem.COLLIDABLE_TYPES.STATIC, window.CollisionSystem.COLLIDABLE_TYPES.MONSTER]
-    );
-    
-    // Restaurar posição original
-    this.mesh.position.copy(currentPosition);
-    window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
-    
-    return collisions.length > 0;
-  }
-
-  // Novo método para mostrar feedback visual de colisão
-  showCollisionFeedback() {
-    // Feedback visual melhorado
-    const originalPosition = this.mesh.position.clone();
-    const shakeAmount = 0.03;
-    
-    // Efeito de vibração suave
-    const sequence = [
-      { x: shakeAmount, z: 0 },
-      { x: -shakeAmount, z: 0 },
-      { x: 0, z: shakeAmount },
-      { x: 0, z: -shakeAmount },
-      { x: 0, z: 0 }
-    ];
-    
-    // Aplica a sequência com intervalos curtos
-    sequence.forEach((offset, index) => {
-      setTimeout(() => {
-        if (this.mesh) {
-          this.mesh.position.x = originalPosition.x + offset.x;
-          this.mesh.position.z = originalPosition.z + offset.z;
-          window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
+      try {
+        // Verifica se o collidable do jogador existe
+        const collidable = window.CollisionSystem.collisionManager.getCollidableByEntityId(this.id);
+        
+        if (collidable) {
+          window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, pos);
+        } else {
+          // Se não existe, criar um novo collidable
+          window.CollisionSystem.createPlayerCollidable(this);
         }
-      }, index * 30);
-    });
-  }
-
-  // Modificar o método escapeCollision para usar a nova lógica de colisão
-  escapeCollision() {
-    // Direções para tentar
-    const escapeDirections = [
-      new THREE.Vector3(1, 0, 0),   // +X
-      new THREE.Vector3(-1, 0, 0),  // -X
-      new THREE.Vector3(0, 0, 1),   // +Z
-      new THREE.Vector3(0, 0, -1),  // -Z
-      new THREE.Vector3(1, 0, 1).normalize(),    // +X+Z
-      new THREE.Vector3(-1, 0, 1).normalize(),   // -X+Z
-      new THREE.Vector3(1, 0, -1).normalize(),   // +X-Z
-      new THREE.Vector3(-1, 0, -1).normalize()   // -X-Z
-    ];
-    
-    // Tentar cada direção com um passo maior para escapar
-    for (const dir of escapeDirections) {
-      const testPosition = this.mesh.position.clone().add(dir.clone().multiplyScalar(0.6));
-      
-      // Testar a posição usando o sistema unificado
-      this.mesh.position.copy(testPosition);
-      window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
-      
-      // Verificar colisões
-      const collisions = window.CollisionSystem.collisionManager.checkEntityCollisions(
-        this.id, 
-        [window.CollisionSystem.COLLIDABLE_TYPES.STATIC, window.CollisionSystem.COLLIDABLE_TYPES.MONSTER]
-      );
-      
-      // Move to position if no collision
-      if (collisions.length === 0) {
-        this.lastValidPosition.copy(testPosition);
-        return true;
+      } catch (error) {
+        console.warn(`Erro ao atualizar collider do jogador ${this.id}:`, error);
       }
     }
-    
-    // Se nenhuma direção funcionou, voltar para a última posição válida
-    this.mesh.position.copy(this.lastValidPosition);
-    window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
-    return false;
   }
   
   // Animate walking - modificado para sempre animar as pernas quando o player está se movendo
@@ -508,7 +301,115 @@ class Player {
       this.lastWalkTime = now;
     }
   }
-
+  
+  // Move player - Simplificado para usar o sistema unificado de colisão
+  move(direction, speed) {
+    if (direction.length() === 0) {
+      this.resetLegsPosition();
+      return false;
+    }
+    
+    // Normalize direction
+    direction.normalize();
+    
+    // Posição original
+    const originalPosition = this.mesh.position.clone();
+    
+    // Calcular a nova posição pretendida
+    const targetPosition = originalPosition.clone().add(
+      new THREE.Vector3(direction.x * speed, 0, direction.z * speed)
+    );
+    
+    // Verificar todas as colisões usando o sistema unificado
+    const canMove = !this.checkAnyCollisions(targetPosition);
+    
+    if (!canMove) {
+      // Tentar movimento parcial em cada eixo separadamente
+      const canMoveX = !this.checkAnyCollisions(new THREE.Vector3(
+        originalPosition.x + direction.x * speed * 0.7,
+        originalPosition.y,
+        originalPosition.z
+      ));
+      
+      const canMoveZ = !this.checkAnyCollisions(new THREE.Vector3(
+        originalPosition.x,
+        originalPosition.y,
+        originalPosition.z + direction.z * speed * 0.7
+      ));
+      
+      // Se puder mover em pelo menos um eixo
+      if (canMoveX || canMoveZ) {
+        const partialMove = originalPosition.clone();
+        
+        if (canMoveX) partialMove.x += direction.x * speed * 0.7;
+        if (canMoveZ) partialMove.z += direction.z * speed * 0.7;
+        
+        // Mover para a posição parcial
+        this.mesh.position.copy(partialMove);
+        this.updateCollider(); // Usar o método que já tem as verificações
+        
+        // Atualizar rotação para a direção desejada
+        const angle = Math.atan2(direction.x, direction.z);
+        this.mesh.rotation.y = angle;
+        
+        this.lastValidPosition.copy(this.mesh.position);
+        this.animateWalk();
+        return true;
+      }
+      
+      // Se não puder mover em nenhum eixo, mostrar feedback sutil
+      if (this.isLocal) this.showCollisionFeedback();
+      return false;
+    }
+    
+    // Sem colisão, pode mover normalmente
+    this.mesh.position.copy(targetPosition);
+    this.updateCollider(); // Usar o método que já tem as verificações
+      
+    // Atualizar rotação
+    const angle = Math.atan2(direction.x, direction.z);
+    this.mesh.rotation.y = angle;
+    
+    // Atualizar última posição válida
+    this.lastValidPosition.copy(this.mesh.position);
+    this.animateWalk();
+    return true;
+  }
+  
+  // Método unificado para verificação de colisões
+  checkAnyCollisions(position) {
+    if (!window.CollisionSystem || !window.CollisionSystem.collisionManager) {
+      console.warn("Sistema de colisão não disponível ao verificar colisões");
+      return false; // Se não tem sistema de colisão, assume que pode mover
+    }
+    
+    const currentPosition = this.mesh.position.clone();
+    
+    try {
+      // Mover temporariamente para testar colisão
+      this.mesh.position.copy(position);
+      window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
+      
+      // Verificar colisões com objetos estáticos e monstros
+      const collisions = window.CollisionSystem.collisionManager.checkEntityCollisions(
+        this.id, 
+        [window.CollisionSystem.COLLIDABLE_TYPES.STATIC, window.CollisionSystem.COLLIDABLE_TYPES.MONSTER]
+      );
+      
+      // Restaurar posição original
+      this.mesh.position.copy(currentPosition);
+      window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
+      
+      return collisions.length > 0;
+    } catch (error) {
+      console.warn("Erro ao verificar colisões:", error);
+      // Restaurar posição original em caso de erro
+      this.mesh.position.copy(currentPosition);
+      window.CollisionSystem.collisionManager.updateCollidablePosition(this.id, this.mesh.position);
+      return false; // Em caso de erro, assume que pode mover
+    }
+  }
+  
   // Novo método para resetar a posição das pernas quando parado
   resetLegsPosition() {
     if (this.parts && this.parts.legs) {
@@ -886,6 +787,31 @@ class Player {
     
     // Return true if killed
     return this.stats.health <= 0;
+  }
+
+  // Animate walking - modificado para sempre animar as pernas quando o player está se movendo
+  animateWalk() {
+    const now = Date.now();
+    
+    // Only update animation every 50ms
+    if (!this.lastWalkTime || now - this.lastWalkTime > 50) {
+      this.walkCycle = (this.walkCycle || 0) + 1;
+      
+      // Simple leg animation
+      const leftLeg = this.parts.legs.left;
+      const rightLeg = this.parts.legs.right;
+      
+      // Certifica que as pernas são visíveis
+      leftLeg.material.opacity = 1;
+      rightLeg.material.opacity = 1;
+      
+      // CORREÇÃO: Aumentar a amplitude da animação para torná-la mais visível
+      const cycle = Math.sin(this.walkCycle * 0.4) * 0.3; // Aumentado de 0.2 para 0.3
+      leftLeg.rotation.x = cycle;
+      rightLeg.rotation.x = -cycle;
+      
+      this.lastWalkTime = now;
+    }
   }
 }
 

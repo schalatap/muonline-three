@@ -355,12 +355,26 @@ class GameWorld {
       console.error("Sistema de colisão não disponível ao registrar collider estático");
       return null;
     }
-    return window.CollisionSystem.createStaticCollidable(object);
+    
+    // Verificar se já existe um collider com este ID para evitar duplicatas
+    const existingCollidable = window.CollisionSystem.collisionManager.getCollidableByEntityId(object.id);
+    if (existingCollidable) {
+      console.log(`Collider para ${object.id} já existe, não será criado novamente`);
+      return existingCollidable;
+    }
+    
+    try {
+      return window.CollisionSystem.createStaticCollidable(object);
+    } catch (error) {
+      console.error(`Erro ao criar collider estático para ${object.id}:`, error);
+      return null;
+    }
   }
   
   // Retorna a lista de colliders
   getColliders() {
     if (window.CollisionSystem && window.CollisionSystem.collisionManager) {
+      // Use o método unificado do sistema de colisão
       return window.CollisionSystem.collisionManager.getActiveColliderBoxes();
     }
     return [];
