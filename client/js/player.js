@@ -320,11 +320,50 @@ class Player {
       new THREE.Vector3(direction.x * speed, 0, direction.z * speed)
     );
     
-    // Verificar todas as colisões usando o sistema unificado
-    const canMove = !this.checkAnyCollisions(targetPosition);
+    // NOVO: Verificar colisões com o sistema unificado, obtendo também direção de escape
+    const collisionResult = window.CollisionSystem.collisionManager.checkCollisionWithEscapeDirection(
+      this.id, 
+      { x: targetPosition.x, y: targetPosition.y, z: targetPosition.z },
+      [window.CollisionSystem.COLLIDABLE_TYPES.STATIC, window.CollisionSystem.COLLIDABLE_TYPES.MONSTER]
+    );
     
-    if (!canMove) {
-      // Tentar movimento parcial em cada eixo separadamente
+    // Se não há colisão, pode mover
+    if (!collisionResult.hasCollision) {
+      this.mesh.position.copy(targetPosition);
+      this.updateCollider();
+      
+      // Atualizar rotação
+      const angle = Math.atan2(direction.x, direction.z);
+      this.mesh.rotation.y = angle;
+      
+      // Atualizar última posição válida
+      this.lastValidPosition.copy(this.mesh.position);
+      this.animateWalk();
+      return true;
+    }
+    
+    // MELHORADO: Tentar movimento com deslizamento em colisões
+    // Usar a direção de escape para determinar como deslizar
+    const escapeDir = collisionResult.escapeDirection;
+    
+    // Calcular componente perpendicular ao movimento (para deslizar)
+    // Produto escalar entre direção e escape = cos(ângulo) * |dir| * |escape|
+    const dotProduct = direction.x * escapeDir.x + direction.z * escapeDir.z;
+    
+    // O vetor projetado na direção de escape
+    const projX = escapeDir.x * dotProduct;
+    const projZ = escapeDir.z * dotProduct;
+    
+    // O vetor de deslizamento é a diferença entre a direção original e sua projeção
+    const slideX = direction.x - projX;
+    const slideZ = direction.z - projZ;
+    
+    // Normalizar o vetor de deslizamento
+    const slideMagnitude = Math.sqrt(slideX * slideX + slideZ * slideZ);
+    
+    // Se o vetor de deslizamento é muito pequeno, tentar movimento parcial em cada eixo
+    if (slideMagnitude < 0.1) {
+      // Tentar movimento parcial em X
       const canMoveX = !this.checkAnyCollisions(new THREE.Vector3(
         originalPosition.x + direction.x * speed * 0.7,
         originalPosition.y,
@@ -337,7 +376,6 @@ class Player {
         originalPosition.z + direction.z * speed * 0.7
       ));
       
-      // Se puder mover em pelo menos um eixo
       if (canMoveX || canMoveZ) {
         const partialMove = originalPosition.clone();
         
@@ -346,7 +384,7 @@ class Player {
         
         // Mover para a posição parcial
         this.mesh.position.copy(partialMove);
-        this.updateCollider(); // Usar o método que já tem as verificações
+        this.updateCollider();
         
         // Atualizar rotação para a direção desejada
         const angle = Math.atan2(direction.x, direction.z);
@@ -357,23 +395,86 @@ class Player {
         return true;
       }
       
-      // Se não puder mover em nenhum eixo, mostrar feedback sutil
+      // Se não pode mover em nenhum eixo, mostrar feedback sutil
       if (this.isLocal) this.showCollisionFeedback();
       return false;
     }
     
-    // Sem colisão, pode mover normalmente
-    this.mesh.position.copy(targetPosition);
-    this.updateCollider(); // Usar o método que já tem as verificações
-      
-    // Atualizar rotação
-    const angle = Math.atan2(direction.x, direction.z);
-    this.mesh.rotation.y = angle;
+    // Tentar movimento de deslizamento 
+    const slideDirection = new THREE.Vector3(
+      slideX / slideMagnitude,
+      0,
+      slideZ / slideMagnitude
+    );
     
-    // Atualizar última posição válida
-    this.lastValidPosition.copy(this.mesh.position);
-    this.animateWalk();
-    return true;
+    const slidePosition = originalPosition.clone().add(
+      slideDirection.multiplyScalar(speed * 0.8) // Velocidade reduzida durante deslizamento
+    );
+    
+    // Verificar se o deslizamento causa colisão
+    const canSlide = !this.checkAnyCollisions(slidePosition);
+    
+    if (canSlide) {
+      // Mover com deslizamento
+      this.mesh.position.copy(slidePosition);
+      this.updateCollider();
+      
+      // Atualizar rotação para direção original
+      const angle = Math.atan2(direction.x, direction.z);
+      this.mesh.rotation.y = angle;
+      
+      this.lastValidPosition.copy(this.mesh.position);
+      this.animateWalk();
+      return true;
+    }
+    
+    // Se não foi possível fazer nenhum movimento, mostrar feedback
+    if (this.isLocal) this.showCollisionFeedback();
+    return false;
+  }
+
+  showCollisionFeedback() {
+    // Evitar spam de feedback
+    if (this.lastCollisionFeedback && Date.now() - this.lastCollisionFeedback < 500) {
+      return;
+    }
+    
+    this.lastCollisionFeedback = Date.now();
+    
+    // Efeito sutil de "empurrão"
+    const angle = this.mesh.rotation.y;
+    const pushbackX = -Math.sin(angle) * 0.05;
+    const pushbackZ = -Math.cos(angle) * 0.05;
+    
+    this.mesh.position.x += pushbackX;
+    this.mesh.position.z += pushbackZ;
+    
+    // Pequena animação do corpo para indicar impacto
+    if (this.parts && this.parts.body) {
+      const originalRotation = this.parts.body.rotation.z;
+      const startTime = Date.now();
+      
+      const animateImpact = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / 150, 1); // 150ms de animação
+        
+        if (progress < 0.5) {
+          // Inclinação para frente
+          this.parts.body.rotation.z = originalRotation + (Math.PI * 0.02) * (progress * 2);
+        } else {
+          // Volta para posição original
+          this.parts.body.rotation.z = originalRotation + (Math.PI * 0.02) * (2 - progress * 2);
+        }
+        
+        if (progress < 1) {
+          requestAnimationFrame(animateImpact);
+        } else {
+          this.parts.body.rotation.z = originalRotation;
+        }
+      };
+      
+      requestAnimationFrame(animateImpact);
+    }
   }
   
   // Método unificado para verificação de colisões

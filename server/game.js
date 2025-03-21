@@ -926,35 +926,61 @@ function startServerLoop(io) {
 
 
 // Função centralizada para mover monstros com colisões
-// Função para mover monstros com tratamento de colisão
 function moveMonster(monster, targetPosition) {
-  const { collisionManager, COLLIDABLE_TYPES } = require('../shared/collision');
+  // Importar o sistema de colisão 
+  const { collisionManager, COLLIDABLE_TYPES, CollisionUtils } = require('../shared/collision');
   
-  // 1. Calcular direção desejada
+  // 1. Calcular a direção desejada
   const dx = targetPosition.x - monster.position.x;
   const dz = targetPosition.z - monster.position.z;
   const distance = Math.sqrt(dx * dx + dz * dz);
   
-  // Se já estiver próximo do alvo, apenas ajusta a rotação
-  if (distance < 0.1) {
+  // Se já está muito próximo do alvo, apenas ajusta a rotação
+  if (distance < 0.05) {
     monster.rotation.y = Math.atan2(dx, dz);
-    return;
+    return true; // Movimento bem-sucedido (chegou ao destino)
   }
   
-  // Normaliza a direção
+  // Direção normalizada para o alvo
   const dirX = dx / distance;
   const dirZ = dz / distance;
   
-  // 2. Verificar separação com outros monstros ANTES de mover
+  // 2. Fator de separação com outros monstros
+  let separationX = 0;
+  let separationZ = 0;
+  let avoidanceX = 0;
+  let avoidanceZ = 0;
+  
+  // 3. Verificar colisões antecipadas para gerar vetor de separação e desvio
+  const currentPosition = { ...monster.position };
+  
+  // Calcular a posição futura (para previsão de colisão)
+  const speed = monster.stats.moveSpeed;
+  const futurePosition = {
+    x: monster.position.x + dirX * speed * 3, // Olha 3 frames à frente
+    y: monster.position.y,
+    z: monster.position.z + dirZ * speed * 3
+  };
+  
+  // Atualiza temporariamente a posição para verificar colisões futuras
+  collisionManager.updateCollidablePosition(monster.id, futurePosition);
+  
+  // Verificar colisões com monstros
   const monsterCollisions = collisionManager.checkEntityCollisions(
     monster.id,
     [COLLIDABLE_TYPES.MONSTER]
   );
   
-  // Calcular vetor de separação
-  let separationX = 0;
-  let separationZ = 0;
+  // Verificar colisões com objetos estáticos
+  const staticCollisions = collisionManager.checkEntityCollisions(
+    monster.id,
+    [COLLIDABLE_TYPES.STATIC]
+  );
   
+  // Restaurar posição original após verificações
+  collisionManager.updateCollidablePosition(monster.id, currentPosition);
+  
+  // 4. Gerar vetor de separação baseado nas colisões com outros monstros
   if (monsterCollisions.length > 0) {
     for (const collision of monsterCollisions) {
       if (!collision.entity) continue;
@@ -964,9 +990,10 @@ function moveMonster(monster, targetPosition) {
       const offsetX = monster.position.x - otherMonster.position.x;
       const offsetZ = monster.position.z - otherMonster.position.z;
       
-      // Quanto mais perto, mais forte a separação
+      // Cálculo da força de separação baseado na distância
+      // Quanto mais próximo, mais forte a repulsão
       const distSq = offsetX * offsetX + offsetZ * offsetZ;
-      const repulsionStrength = 2.0 / (distSq + 0.1); // Evita divisão por zero
+      const repulsionStrength = Math.min(2.5, 4.0 / (distSq + 0.1)); // Evita divisão por zero
       
       separationX += offsetX * repulsionStrength;
       separationZ += offsetZ * repulsionStrength;
@@ -980,13 +1007,41 @@ function moveMonster(monster, targetPosition) {
     }
   }
   
-  // 3. Calcular direção final combinando direção ao alvo e separação
+  // 5. Gerar vetor de desvio baseado nas colisões com objetos estáticos
+  if (staticCollisions.length > 0) {
+    for (const collision of staticCollisions) {
+      if (!collision.collidable) continue;
+      
+      // Usar a direção da colisão para gerar desvio
+      const direction = collision.direction || { x: 0, z: 0 };
+      
+      // Força de desvio proporcional à penetração
+      const avoidanceStrength = 2.0;
+      
+      avoidanceX += direction.x * avoidanceStrength;
+      avoidanceZ += direction.z * avoidanceStrength;
+    }
+    
+    // Normalizar o vetor de desvio
+    const avoidLength = Math.sqrt(avoidanceX * avoidanceX + avoidanceZ * avoidanceZ);
+    if (avoidLength > 0) {
+      avoidanceX /= avoidLength;
+      avoidanceZ /= avoidLength;
+    }
+  }
+  
+  // 6. Calcular direção final combinando todos os fatores
   let moveX, moveZ;
   
-  if (monsterCollisions.length > 0) {
-    // Mais peso para separação quando há colisões (75% separação, 25% direção ao alvo)
-    moveX = dirX * 0.25 + separationX * 0.75;
-    moveZ = dirZ * 0.25 + separationZ * 0.75;
+  // Pesos para cada componente da movimentação
+  const targetWeight = 0.6;  // Peso da direção ao alvo
+  const separationWeight = 0.3;  // Peso da separação com outros monstros
+  const avoidanceWeight = 0.7;  // Peso do desvio de obstáculos (alto para não ficar preso)
+  
+  if (monsterCollisions.length > 0 || staticCollisions.length > 0) {
+    // Combinar vetores com pesos
+    moveX = (dirX * targetWeight) + (separationX * separationWeight) + (avoidanceX * avoidanceWeight);
+    moveZ = (dirZ * targetWeight) + (separationZ * separationWeight) + (avoidanceZ * avoidanceWeight);
     
     // Renormalizar
     const moveLength = Math.sqrt(moveX * moveX + moveZ * moveZ);
@@ -995,33 +1050,34 @@ function moveMonster(monster, targetPosition) {
       moveZ /= moveLength;
     }
   } else {
+    // Sem colisões, movimento direto para o alvo
     moveX = dirX;
     moveZ = dirZ;
   }
   
-  // 4. Calcular nova posição
-  const speed = monster.stats.moveSpeed;
+  // 7. Calcular nova posição com a direção ajustada
   const newPosition = {
     x: monster.position.x + moveX * speed,
     y: monster.position.y,
     z: monster.position.z + moveZ * speed
   };
   
-  // 5. IMPORTANTE: Salvar posição atual antes de testar colisões
+  // 8. IMPORTANTE: Salvar posição atual antes de testar colisões
   const oldPosition = { ...monster.position };
   
-  // 6. Testar a nova posição
+  // 9. Testar a nova posição
   monster.position = newPosition;
   collisionManager.updateCollidablePosition(monster.id, newPosition);
   
-  // 7. Verificar colisões com objetos estáticos
-  const staticCollisions = collisionManager.checkEntityCollisions(
+  // 10. Verificar colisões finais com objetos estáticos
+  const finalStaticCollisions = collisionManager.checkEntityCollisions(
     monster.id,
     [COLLIDABLE_TYPES.STATIC]
   );
   
-  // 8. Se colidir com objetos estáticos, voltar para posição anterior
-  if (staticCollisions.length > 0) {
+  // 11. Se colidir com objetos estáticos, tentar movimento parcial
+  if (finalStaticCollisions.length > 0) {
+    // Voltar à posição original
     monster.position = oldPosition;
     collisionManager.updateCollidablePosition(monster.id, oldPosition);
     
@@ -1036,9 +1092,12 @@ function moveMonster(monster, targetPosition) {
     monster.position = tryX;
     collisionManager.updateCollidablePosition(monster.id, tryX);
     
-    if (collisionManager.checkEntityCollisions(monster.id, [COLLIDABLE_TYPES.STATIC]).length === 0) {
+    const xCollisions = collisionManager.checkEntityCollisions(monster.id, [COLLIDABLE_TYPES.STATIC]);
+    
+    if (xCollisions.length === 0) {
       // Movimento no eixo X é válido
-      return;
+      monster.rotation.y = Math.atan2(moveX, moveZ);
+      return true;
     }
     
     // Restaura posição e tenta agora o eixo Z
@@ -1054,18 +1113,75 @@ function moveMonster(monster, targetPosition) {
     monster.position = tryZ;
     collisionManager.updateCollidablePosition(monster.id, tryZ);
     
-    if (collisionManager.checkEntityCollisions(monster.id, [COLLIDABLE_TYPES.STATIC]).length === 0) {
+    const zCollisions = collisionManager.checkEntityCollisions(monster.id, [COLLIDABLE_TYPES.STATIC]);
+    
+    if (zCollisions.length === 0) {
       // Movimento no eixo Z é válido
-      return;
+      monster.rotation.y = Math.atan2(moveX, moveZ);
+      return true;
     }
     
-    // Se nada funcionar, volte à posição original
+    // Se nenhum movimento parcial funcionar, tentar deslizar ao longo da parede
     monster.position = oldPosition;
     collisionManager.updateCollidablePosition(monster.id, oldPosition);
+    
+    // Calcular vetor perpendicular para deslizar ao longo da parede (tenta os dois sentidos)
+    const perpX1 = -moveZ;
+    const perpZ1 = moveX;
+    const perpX2 = moveZ;
+    const perpZ2 = -moveX;
+    
+    // Tenta deslizar no primeiro sentido perpendicular
+    const tryPerp1 = {
+      x: oldPosition.x + perpX1 * speed * 0.5, // Velocidade reduzida durante deslizamento
+      y: oldPosition.y,
+      z: oldPosition.z + perpZ1 * speed * 0.5
+    };
+    
+    monster.position = tryPerp1;
+    collisionManager.updateCollidablePosition(monster.id, tryPerp1);
+    
+    const perp1Collisions = collisionManager.checkEntityCollisions(monster.id, [COLLIDABLE_TYPES.STATIC]);
+    
+    if (perp1Collisions.length === 0) {
+      // Deslizamento no primeiro sentido é válido
+      monster.rotation.y = Math.atan2(moveX, moveZ); // Mantém olhando para o alvo
+      return true;
+    }
+    
+    // Restaura e tenta o segundo sentido perpendicular
+    monster.position = oldPosition;
+    collisionManager.updateCollidablePosition(monster.id, oldPosition);
+    
+    const tryPerp2 = {
+      x: oldPosition.x + perpX2 * speed * 0.5,
+      y: oldPosition.y,
+      z: oldPosition.z + perpZ2 * speed * 0.5
+    };
+    
+    monster.position = tryPerp2;
+    collisionManager.updateCollidablePosition(monster.id, tryPerp2);
+    
+    const perp2Collisions = collisionManager.checkEntityCollisions(monster.id, [COLLIDABLE_TYPES.STATIC]);
+    
+    if (perp2Collisions.length === 0) {
+      // Deslizamento no segundo sentido é válido
+      monster.rotation.y = Math.atan2(moveX, moveZ); // Mantém olhando para o alvo
+      return true;
+    }
+    
+    // Se tudo falhar, fica parado mas atualiza a rotação
+    monster.position = oldPosition;
+    collisionManager.updateCollidablePosition(monster.id, oldPosition);
+    monster.rotation.y = Math.atan2(moveX, moveZ);
+    
+    // Retorna falso para indicar movimento bloqueado
+    return false;
   }
   
-  // 9. Atualiza rotação para olhar para o alvo
+  // 12. Se chegou aqui é porque o movimento foi bem-sucedido
   monster.rotation.y = Math.atan2(moveX, moveZ);
+  return true;
 }
 
 // Nova função para verificar colisões estáticas em cada eixo
