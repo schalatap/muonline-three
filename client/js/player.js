@@ -534,48 +534,38 @@ class Player {
   
   // Check for melee attack hits
   checkMeleeAttackHits() {
-    // Verificar acertos em jogadores
-    const hits = window.CollisionSystem.checkAreaAttack(
+    // Verificar ataques em todos os tipos de alvos de uma vez
+    const hits = window.CollisionSystem.collisionManager.checkAreaAttack(
       this.id,
       this.mesh.position,
       window.CollisionSystem.COLLISION_CONSTANTS.MELEE_ATTACK_RANGE,
-      [window.CollisionSystem.COLLIDABLE_TYPES.PLAYER]
+      [window.CollisionSystem.COLLIDABLE_TYPES.PLAYER, window.CollisionSystem.COLLIDABLE_TYPES.MONSTER]
     );
     
-    // Processar acertos
+    // Processar cada alvo atingido
     hits.forEach(hit => {
-      if (hit.entity && hit.entity.id !== this.id) {
-        // Calcular dano baseado em força
-        const BASE_DAMAGE = 5;
-        const strengthBonus = this.stats.strength * 0.5;
-        const damage = Math.floor(BASE_DAMAGE + strengthBonus);
-        
-        // Feedback visual
-        hit.entity.showDamageEffect();
-        showDamageNumber(hit.entity.mesh.position, damage);
+      if (!hit.entity) return;
+      
+      // Ignorar se for o próprio jogador
+      if (hit.collidable.type === window.CollisionSystem.COLLIDABLE_TYPES.PLAYER && 
+          hit.entity.id === this.id) return;
+      
+      // Calcular dano baseado em força
+      const BASE_DAMAGE = 5;
+      const strengthBonus = this.stats.strength * 0.5;
+      const damage = Math.floor(BASE_DAMAGE + strengthBonus);
+      
+      // Feedback visual
+      hit.entity.showDamageEffect();
+      showDamageNumber(hit.entity.mesh.position, damage);
+      
+      // Enviar dano ao servidor para monstros (se for o jogador local)
+      if (this.isLocal && hit.collidable.type === window.CollisionSystem.COLLIDABLE_TYPES.MONSTER) {
+        sendSpellHitMonster(hit.entity.id, damage);
       }
     });
     
-    // Verificar acertos em monstros
-    const monsterHits = window.CollisionSystem.checkAreaAttack(
-      this.id,
-      this.mesh.position,
-      window.CollisionSystem.COLLISION_CONSTANTS.MELEE_ATTACK_RANGE,
-      [window.CollisionSystem.COLLIDABLE_TYPES.MONSTER]
-    );
-    
-    monsterHits.forEach(hit => {
-      if (hit.entity) {
-        const BASE_DAMAGE = 5;
-        const strengthBonus = this.stats.strength * 0.5;
-        const damage = Math.floor(BASE_DAMAGE + strengthBonus);
-        
-        hit.entity.showDamageEffect();
-        showDamageNumber(hit.entity.mesh.position, damage);
-      }
-    });
-    
-    return hits.length > 0 || monsterHits.length > 0;
+    return hits.length > 0;
   }
 
   checkExhaustion() {

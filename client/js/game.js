@@ -380,67 +380,48 @@ function castSpellAtTarget(event) {
 
 // Perform melee attack at target or position
 function performMeleeAttack(event) {
-  // Ignora se não tiver vigor suficiente
+  // Verificar vigor
   const STAMINA_COST = 10;
   if (localPlayer.stats.stamina < STAMINA_COST) {
     addSystemMessage("Vigor insuficiente para atacar!");
     return;
   }
   
-  // Check if we have a selected target
+  // Consumir vigor
+  localPlayer.stats.stamina -= STAMINA_COST;
+  localPlayer.updateUI();
+  
+  // Identificar alvo (se houver)
+  let targetId = null;
+  let targetPosition = worldMousePosition;
+  
   if (selectedTarget) {
-    // Verificar se o alvo é um monstro ou jogador
-    if (selectedTarget.id && (selectedTarget.id.includes('goblin_') || selectedTarget.id.includes('wolf_'))) {
-      // É um monstro
-      localPlayer.attack(selectedTarget.mesh.position);
-      
-      // Envia ataque direcionado para o servidor
-      sendPlayerAttack({
-        targetId: selectedTarget.id,
-        position: {
-          x: localPlayer.mesh.position.x,
-          y: localPlayer.mesh.position.y,
-          z: localPlayer.mesh.position.z
-        },
-        rotation: {
-          y: localPlayer.mesh.rotation.y
-        }
-      });
-    } else {
-      // É um jogador (código original)
-      const targetId = Object.keys(players).find(id => players[id] === selectedTarget);
-      
-      localPlayer.attack(selectedTarget.mesh.position);
-      
-      // Envia ataque para o servidor
-      sendPlayerAttack({
-        targetId: targetId,
-        position: {
-          x: localPlayer.mesh.position.x,
-          y: localPlayer.mesh.position.y,
-          z: localPlayer.mesh.position.z
-        },
-        rotation: {
-          y: localPlayer.mesh.rotation.y
-        }
-      });
-    }
-  } else {
-    // Ataque no ar (direção do mouse)
-    localPlayer.attack(worldMousePosition);
+    targetPosition = selectedTarget.mesh.position;
     
-    // Envia ataque normal para o servidor
-    sendPlayerAttack({
-      position: {
-        x: localPlayer.mesh.position.x,
-        y: localPlayer.mesh.position.y,
-        z: localPlayer.mesh.position.z
-      },
-      rotation: {
-        y: localPlayer.mesh.rotation.y
-      }
-    });
+    // Determinar se é monstro ou jogador
+    if (selectedTarget.id && (selectedTarget.id.includes('goblin_') || selectedTarget.id.includes('wolf_'))) {
+      targetId = selectedTarget.id;
+    } else {
+      // É um jogador
+      targetId = Object.keys(players).find(id => players[id] === selectedTarget);
+    }
   }
+  
+  // Executar o ataque
+  localPlayer.attack(targetPosition);
+  
+  // Enviar ataque para o servidor
+  sendPlayerAttack({
+    targetId: targetId,
+    position: {
+      x: localPlayer.mesh.position.x,
+      y: localPlayer.mesh.position.y,
+      z: localPlayer.mesh.position.z
+    },
+    rotation: {
+      y: localPlayer.mesh.rotation.y
+    }
+  });
 }
 
 // Handle keyboard inputs

@@ -441,6 +441,32 @@
       });
       return boxes;
     }
+
+    checkAreaAttack(attackerId, position, range, targetTypes) {
+      const hits = [];
+      
+      this.collidables.forEach(collidable => {
+        if (!collidable.enabled) return;
+        if (collidable.owner && collidable.owner.id === attackerId) return;
+        if (targetTypes && !targetTypes.includes(collidable.type)) return;
+        
+        const dx = collidable.position.x - position.x;
+        const dz = collidable.position.z - position.z;
+        const distSquared = dx * dx + dz * dz;
+        
+        const effectiveRange = range + collidable.getEffectiveRadius();
+        
+        if (distSquared <= (effectiveRange * effectiveRange)) {
+          hits.push({
+            collidable: collidable,
+            entity: collidable.owner,
+            distance: Math.sqrt(distSquared)
+          });
+        }
+      });
+      
+      return hits;
+    }
     
     // NOVA FUNÇÃO: Verificar colisão com direção de escape
     checkCollisionWithEscapeDirection(entityId, newPosition, includeTypes) {
@@ -485,6 +511,184 @@
         escapeDirection: { x: escapeX, z: escapeZ },
         collisions: collisions
       };
+    }
+
+    // NOVO MÉTODO: Movimenta entidade com verificação de colisão
+    moveWithCollision(entityId, currentPosition, direction, speed, collisionTypes) {
+      const collidable = this.getCollidableByEntityId(entityId);
+      
+      if (!collidable || !collidable.enabled) {
+        return { success: false, reason: "No valid collidable" };
+      }
+      
+      // Guardar posição original
+      const originalPosition = { ...collidable.position };
+      
+      // Calcular posição alvo
+      const targetPosition = {
+        x: currentPosition.x + direction.x * speed,
+        y: currentPosition.y,
+        z: currentPosition.z + direction.z * speed
+      };
+      
+      // Verificar colisão
+      this.updateCollidablePosition(entityId, targetPosition);
+      const collisions = this.checkEntityCollisions(entityId, collisionTypes);
+      this.updateCollidablePosition(entityId, originalPosition);
+      
+      // Se não há colisão, movimento direto
+      if (collisions.length === 0) {
+        return {
+          success: true,
+          newPosition: targetPosition,
+          collision: false
+        };
+      }
+      
+      // Tentar deslizamento - lógica simplificada
+      const slideResult = this.trySlideMovement(entityId, currentPosition, direction, speed, collisions, collisionTypes);
+      if (slideResult.success) {
+        return slideResult;
+      }
+      
+      // Tentar movimento em um único eixo
+      const axisResult = this.tryAxisMovement(entityId, currentPosition, direction, speed, collisionTypes);
+      if (axisResult.success) {
+        return axisResult;
+      }
+      
+      // Movimento bloqueado - calcular direção de escape
+      const escapeDirection = this.calculateEscapeDirection(collisions);
+      
+      return {
+        success: false,
+        collision: true,
+        escapeDirection: escapeDirection
+      };
+    }
+
+    // NOVO MÉTODO: Tenta movimento de deslizamento
+    trySlideMovement(entityId, currentPosition, direction, speed, collisions, collisionTypes) {
+      // Calcular direção de escape
+      const escapeDirection = this.calculateEscapeDirection(collisions);
+      
+      // Calcular direção de deslizamento
+      const dotProduct = direction.x * escapeDirection.x + direction.z * escapeDirection.z;
+      const slideDirection = {
+        x: direction.x - escapeDirection.x * dotProduct,
+        z: direction.z - escapeDirection.z * dotProduct
+      };
+      
+      // Normalizar direção de deslizamento
+      const slideLength = Math.sqrt(slideDirection.x * slideDirection.x + slideDirection.z * slideDirection.z);
+      if (slideLength <= 0.1) {
+        return { success: false };
+      }
+      
+      slideDirection.x /= slideLength;
+      slideDirection.z /= slideLength;
+      
+      // Calcular posição de deslizamento
+      const slidePosition = {
+        x: currentPosition.x + slideDirection.x * speed * 0.8,
+        y: currentPosition.y,
+        z: currentPosition.z + slideDirection.z * speed * 0.8
+      };
+      
+      // Verificar colisão na posição de deslizamento
+      const collidable = this.getCollidableByEntityId(entityId);
+      const originalPosition = { ...collidable.position };
+      
+      this.updateCollidablePosition(entityId, slidePosition);
+      const slideCollisions = this.checkEntityCollisions(entityId, collisionTypes);
+      this.updateCollidablePosition(entityId, originalPosition);
+      
+      if (slideCollisions.length === 0) {
+        return {
+          success: true,
+          newPosition: slidePosition,
+          collision: true,
+          slide: true
+        };
+      }
+      
+      return { success: false };
+    }
+
+    // NOVO MÉTODO: Tenta movimento em um único eixo
+    tryAxisMovement(entityId, currentPosition, direction, speed, collisionTypes) {
+      // Tentar movimento apenas no eixo X
+      if (Math.abs(direction.x) > 0.1) {
+        const xPosition = {
+          x: currentPosition.x + direction.x * speed * 0.7,
+          y: currentPosition.y,
+          z: currentPosition.z
+        };
+        
+        const collidable = this.getCollidableByEntityId(entityId);
+        const originalPosition = { ...collidable.position };
+        
+        this.updateCollidablePosition(entityId, xPosition);
+        const xCollisions = this.checkEntityCollisions(entityId, collisionTypes);
+        this.updateCollidablePosition(entityId, originalPosition);
+        
+        if (xCollisions.length === 0) {
+          return {
+            success: true,
+            newPosition: xPosition,
+            collision: true,
+            axisOnly: 'x'
+          };
+        }
+      }
+      
+      // Tentar movimento apenas no eixo Z
+      if (Math.abs(direction.z) > 0.1) {
+        const zPosition = {
+          x: currentPosition.x,
+          y: currentPosition.y,
+          z: currentPosition.z + direction.z * speed * 0.7
+        };
+        
+        const collidable = this.getCollidableByEntityId(entityId);
+        const originalPosition = { ...collidable.position };
+        
+        this.updateCollidablePosition(entityId, zPosition);
+        const zCollisions = this.checkEntityCollisions(entityId, collisionTypes);
+        this.updateCollidablePosition(entityId, originalPosition);
+        
+        if (zCollisions.length === 0) {
+          return {
+            success: true,
+            newPosition: zPosition,
+            collision: true,
+            axisOnly: 'z'
+          };
+        }
+      }
+      
+      return { success: false };
+    }
+
+    // NOVO MÉTODO: Calcula direção de escape com base nas colisões
+    calculateEscapeDirection(collisions) {
+      let escapeX = 0, escapeZ = 0;
+      
+      for (const collision of collisions) {
+        if (collision.direction) {
+          escapeX += collision.direction.x;
+          escapeZ += collision.direction.z;
+        }
+      }
+      
+      // Normalizar direção de escape
+      const escapeLength = Math.sqrt(escapeX * escapeX + escapeZ * escapeZ);
+      if (escapeLength > 0) {
+        escapeX /= escapeLength;
+        escapeZ /= escapeLength;
+      }
+      
+      return { x: escapeX, z: escapeZ };
     }
   }
   
@@ -701,125 +905,7 @@
    */
   exports.moveWithCollision = function(entityId, currentPosition, direction, speed, collisionTypes) {
     const manager = getCollisionManager();
-    const collidable = manager.getCollidableByEntityId(entityId);
-    
-    if (!collidable || !collidable.enabled) {
-      return { success: false, reason: "No valid collidable" };
-    }
-    
-    // Guardar posição original
-    const originalPosition = { ...collidable.position };
-    
-    // Calcular posição alvo
-    const targetPosition = {
-      x: currentPosition.x + direction.x * speed,
-      y: currentPosition.y,
-      z: currentPosition.z + direction.z * speed
-    };
-    
-    // Verificar colisão
-    manager.updateCollidablePosition(entityId, targetPosition);
-    const collisions = manager.checkEntityCollisions(entityId, collisionTypes);
-    manager.updateCollidablePosition(entityId, originalPosition);
-    
-    // Se não há colisão, movimento direto
-    if (collisions.length === 0) {
-      return {
-        success: true,
-        newPosition: targetPosition,
-        collision: false
-      };
-    }
-    
-    // Calcular direção de escape
-    let escapeX = 0, escapeZ = 0;
-    for (const collision of collisions) {
-      if (collision.direction) {
-        escapeX += collision.direction.x;
-        escapeZ += collision.direction.z;
-      }
-    }
-    
-    // Normalizar direção de escape
-    const escapeLength = Math.sqrt(escapeX * escapeX + escapeZ * escapeZ);
-    if (escapeLength > 0) {
-      escapeX /= escapeLength;
-      escapeZ /= escapeLength;
-    }
-    
-    // Calcular direção de deslizamento
-    const dotProduct = direction.x * escapeX + direction.z * escapeZ;
-    const slideX = direction.x - escapeX * dotProduct;
-    const slideZ = direction.z - escapeZ * dotProduct;
-    const slideLength = Math.sqrt(slideX * slideX + slideZ * slideZ);
-    
-    // Se possível, deslizar junto da superfície
-    if (slideLength > 0.1) {
-      const slidePosition = {
-        x: currentPosition.x + (slideX / slideLength) * speed * 0.8,
-        y: currentPosition.y,
-        z: currentPosition.z + (slideZ / slideLength) * speed * 0.8
-      };
-      
-      manager.updateCollidablePosition(entityId, slidePosition);
-      const slideCollisions = manager.checkEntityCollisions(entityId, collisionTypes);
-      manager.updateCollidablePosition(entityId, originalPosition);
-      
-      if (slideCollisions.length === 0) {
-        return {
-          success: true,
-          newPosition: slidePosition,
-          collision: true,
-          slide: true
-        };
-      }
-    }
-    
-    // Tentar movimento apenas nos eixos individuais
-    const xPosition = {
-      x: currentPosition.x + direction.x * speed * 0.7,
-      y: currentPosition.y,
-      z: currentPosition.z
-    };
-    
-    manager.updateCollidablePosition(entityId, xPosition);
-    const xCollisions = manager.checkEntityCollisions(entityId, collisionTypes);
-    manager.updateCollidablePosition(entityId, originalPosition);
-    
-    if (xCollisions.length === 0) {
-      return {
-        success: true,
-        newPosition: xPosition,
-        collision: true,
-        axisOnly: 'x'
-      };
-    }
-    
-    const zPosition = {
-      x: currentPosition.x,
-      y: currentPosition.y,
-      z: currentPosition.z + direction.z * speed * 0.7
-    };
-    
-    manager.updateCollidablePosition(entityId, zPosition);
-    const zCollisions = manager.checkEntityCollisions(entityId, collisionTypes);
-    manager.updateCollidablePosition(entityId, originalPosition);
-    
-    if (zCollisions.length === 0) {
-      return {
-        success: true,
-        newPosition: zPosition,
-        collision: true,
-        axisOnly: 'z'
-      };
-    }
-    
-    // Movimento bloqueado
-    return {
-      success: false,
-      collision: true,
-      escapeDirection: { x: escapeX, z: escapeZ }
-    };
+    return manager.moveWithCollision(entityId, currentPosition, direction, speed, collisionTypes);
   };
 
   /**

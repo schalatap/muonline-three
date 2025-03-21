@@ -13,8 +13,11 @@ const {
 
 // Pontos de spawn no mapa (simplificado)
 const spawnPoints = [
-  { x: 0, y: 0, z: 0 },
-  { x: 5, y: 0, z: 5 },
+  { x: 7, y: 0, z: 7 },    // Novo ponto seguro
+  { x: -7, y: 0, z: 7 },   // Novo ponto seguro
+  { x: 7, y: 0, z: -7 },   // Novo ponto seguro
+  { x: -7, y: 0, z: -7 },  // Novo ponto seguro
+  { x: 5, y: 0, z: 5 },    // Pontos anteriores
   { x: -5, y: 0, z: -5 },
   { x: 5, y: 0, z: -5 },
   { x: -5, y: 0, z: 5 }

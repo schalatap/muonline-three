@@ -534,38 +534,14 @@ function updateMonsterColliders() {
   for (const id in monsters) {
     const monster = monsters[id];
     if (monster.mesh) {
-      try {
-        // MELHORADO: Atualizar a posição do collidable no gerenciador unificado
-        // com tratamento adequado de erros e verificação de existência
-        const collidable = window.CollisionSystem.collisionManager.getCollidableByEntityId(monster.id);
-        
-        if (collidable) {
-          // Atualizar posição do collidable existente
-          const position = {
-            x: monster.mesh.position.x,
-            y: monster.mesh.position.y,
-            z: monster.mesh.position.z
-          };
-          
-          window.CollisionSystem.collisionManager.updateCollidablePosition(monster.id, position);
-          
-          // Garantir que o estado de colisão corresponde ao estado do monstro
-          if (monster.state === 'dead') {
-            window.CollisionSystem.collisionManager.disableCollisionForEntity(monster.id);
-          } else {
-            window.CollisionSystem.collisionManager.enableCollisionForEntity(monster.id);
-          }
-        } else {
-          // Se o collidable não existe, criar um novo
-          window.CollisionSystem.createMonsterCollidable(monster);
-          
-          // Verificar novamente se o monstro está morto
-          if (monster.state === 'dead') {
-            window.CollisionSystem.collisionManager.disableCollisionForEntity(monster.id);
-          }
-        }
-      } catch (error) {
-        console.warn(`Erro ao atualizar collider do monstro ${monster.id}:`, error);
+      // Atualizar a posição do collidable
+      window.CollisionSystem.collisionManager.updateCollidablePosition(monster.id, monster.mesh.position);
+      
+      // Atualizar estado de colisão com base no estado do monstro
+      if (monster.state === 'dead') {
+        window.CollisionSystem.collisionManager.disableCollisionForEntity(monster.id);
+      } else {
+        window.CollisionSystem.collisionManager.enableCollisionForEntity(monster.id);
       }
     }
   }

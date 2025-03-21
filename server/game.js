@@ -393,49 +393,53 @@ function getPlayersData() {
 function checkAttackCollisions(attackerId, attackPosition, io) {
   const ATTACK_RANGE = 2.5; // Attack range
   
+  // Usar o sistema centralizado para verificar colisões
+  const hits = collisionManager.checkAreaAttack(
+    attackerId,
+    attackPosition,
+    ATTACK_RANGE,
+    [COLLIDABLE_TYPES.PLAYER]
+  );
+  
   const attacker = players[attackerId];
   let hitAnyone = false;
   
-  for (const id in players) {
-    // Don't attack self
-    if (id === attackerId) continue;
+  // Processar cada jogador atingido
+  hits.forEach(hit => {
+    if (!hit.entity || !hit.entity.id || hit.entity.id === attackerId) return;
     
-    const target = players[id];
-    const dx = target.position.x - attackPosition.x;
-    const dz = target.position.z - attackPosition.z;
-    const distance = Math.sqrt(dx * dx + dz * dz);
+    const targetId = hit.entity.id;
+    const target = players[targetId];
     
-    if (distance <= ATTACK_RANGE) {
-      // Calculate damage based on attacker's strength
-      const BASE_DAMAGE = 5;
-      const strengthBonus = attacker.stats.strength * 0.5;
-      const DAMAGE = Math.floor(BASE_DAMAGE + strengthBonus);
-      
-      // Apply damage to player
-      target.stats.health -= DAMAGE;
-      
-      // Update statistics
-      attacker.statistics.damageDealt += DAMAGE;
-      target.statistics.damageReceived += DAMAGE;
-      
-      console.log(`Jogador ${id} atingido! Vida restante: ${target.stats.health}`);
-      
-      // Emit damage event
-      io.emit('playerDamaged', {
-        id: id,
-        health: target.stats.health,
-        attackerId: attackerId,
-        damage: DAMAGE
-      });
-      
-      hitAnyone = true;
-      
-      // Check if player died
-      if (target.stats.health <= 0) {
-        handlePlayerDeath(id, attackerId, io);
-      }
+    // Calcular dano baseado na força do atacante
+    const BASE_DAMAGE = 5;
+    const strengthBonus = attacker.stats.strength * 0.5;
+    const DAMAGE = Math.floor(BASE_DAMAGE + strengthBonus);
+    
+    // Aplicar dano ao alvo
+    target.stats.health -= DAMAGE;
+    
+    // Atualizar estatísticas
+    attacker.statistics.damageDealt += DAMAGE;
+    target.statistics.damageReceived += DAMAGE;
+    
+    console.log(`Jogador ${targetId} atingido! Vida restante: ${target.stats.health}`);
+    
+    // Emitir evento de dano
+    io.emit('playerDamaged', {
+      id: targetId,
+      health: target.stats.health,
+      attackerId: attackerId,
+      damage: DAMAGE
+    });
+    
+    hitAnyone = true;
+    
+    // Verificar se o jogador morreu
+    if (target.stats.health <= 0) {
+      handlePlayerDeath(targetId, attackerId, io);
     }
-  }
+  });
   
   return hitAnyone;
 }
@@ -592,136 +596,107 @@ function handleChaseState(monster) {
     return;
   }
   
-  // Verifica se o jogador está muito longe (além do alcance de perseguição)
+  // Verifica se o jogador está muito longe
   if (distSq > monster.stats.chaseRange * monster.stats.chaseRange) {
     monster.targetId = null;
     monster.currentState = 'return';
     return;
   }
   
-  // Determina direção para o jogador
-  const direction = { x: dx, z: dz };
-  const length = Math.sqrt(distSq);
+  // Calcula a direção combinada (perseguição + separação)
+  const chaseDirection = { 
+    x: dx / Math.sqrt(distSq),
+    z: dz / Math.sqrt(distSq)
+  };
   
-  // Normaliza a direção
-  direction.x /= length;
-  direction.z /= length;
+  // Obter vetor de separação de outros monstros
+  const separationVector = calculateSeparationVector(monster);
   
-  // Aplicar comportamento de separação de bando
-  const separationDirection = calculateSeparationVector(monster);
-  
-  // MODIFICAÇÃO: Verificar se o monstro está em colisão 
+  // Verificar se o monstro está em colisão recente
   const isColliding = monster.lastCollisionTime && (Date.now() - monster.lastCollisionTime < 500);
   
-  // Combinar as direções com pesos diferentes baseados na situação
-  let chaseWeight = 0.7;
-  let separationWeight = 0.3;
+  // Pesos para combinar direções
+  const chaseWeight = isColliding ? 0.1 : 0.7;
+  const separationWeight = isColliding ? 0.9 : 0.3;
   
-  // Se estiver em colisão, dar muito mais peso à separação
+  // Combinar direções
+  const combinedDirection = {
+    x: chaseDirection.x * chaseWeight + separationVector.x * separationWeight,
+    z: chaseDirection.z * chaseWeight + separationVector.z * separationWeight
+  };
+  
+  // Normalizar a direção combinada
+  const dirLength = Math.sqrt(combinedDirection.x * combinedDirection.x + combinedDirection.z * combinedDirection.z);
+  if (dirLength > 0) {
+    combinedDirection.x /= dirLength;
+    combinedDirection.z /= dirLength;
+  }
+  
+  // Adicionar jitter aleatório se estiver preso
   if (isColliding) {
-    chaseWeight = 0.1;     // Reduzido ainda mais (de 0.2 para 0.1)
-    separationWeight = 0.9; // Aumentado (de 0.8 para 0.9)
+    combinedDirection.x += (Math.random() - 0.5) * 0.4;
+    combinedDirection.z += (Math.random() - 0.5) * 0.4;
     
-    // ADIÇÃO: Jitter aleatório para ajudar a escapar de situações de travamento
-    finalDirection.x += (Math.random() - 0.5) * 0.4;
-    finalDirection.z += (Math.random() - 0.5) * 0.4;
+    // Renormalizar após adicionar jitter
+    const jitterLength = Math.sqrt(combinedDirection.x * combinedDirection.x + combinedDirection.z * combinedDirection.z);
+    if (jitterLength > 0) {
+      combinedDirection.x /= jitterLength;
+      combinedDirection.z /= jitterLength;
+    }
   }
   
-  const finalDirection = {
-    x: direction.x * chaseWeight + separationDirection.x * separationWeight,
-    z: direction.z * chaseWeight + separationDirection.z * separationWeight
-  };
+  // Usar moveWithCollision para mover o monstro
+  const moveResult = collisionManager.moveWithCollision(
+    monster.id,
+    monster.position,
+    combinedDirection,
+    monster.stats.moveSpeed,
+    [COLLIDABLE_TYPES.MONSTER, COLLIDABLE_TYPES.STATIC]
+  );
   
-  // Normalizar o vetor final
-  const finalLength = Math.sqrt(finalDirection.x * finalDirection.x + finalDirection.z * finalDirection.z);
-  if (finalLength > 0) {
-    finalDirection.x /= finalLength;
-    finalDirection.z /= finalLength;
+  // Atualizar posição se o movimento for bem sucedido
+  if (moveResult.success) {
+    monster.position = moveResult.newPosition;
+    monster.rotation.y = Math.atan2(combinedDirection.x, combinedDirection.z);
+  } 
+  // Se houver colisão, registrar o timestamp para ajudar na lógica de escape
+  else if (moveResult.collision) {
+    monster.lastCollisionTime = Date.now();
   }
   
-  // Calcular nova posição tentativa
-  const newPosition = {
-    x: monster.position.x + finalDirection.x * monster.stats.moveSpeed,
-    y: monster.position.y,
-    z: monster.position.z + finalDirection.z * monster.stats.moveSpeed
+  // Se o monstro estiver preso por muito tempo, teleportar para posição segura
+  if (monster.lastCollisionTime && Date.now() - monster.lastCollisionTime > 3000) {
+    teleportMonsterToSafePosition(monster);
+  }
+}
+
+// Nova função auxiliar para teleportar monstros presos
+function teleportMonsterToSafePosition(monster) {
+  const randomOffset = {
+    x: (Math.random() - 0.5) * 5,
+    z: (Math.random() - 0.5) * 5
   };
   
-  // Verificar colisão usando o sistema de colisão
-  const tempPosition = { ...monster.position };
-  monster.position = newPosition;
+  monster.position.x = monster.spawnPosition.x + randomOffset.x;
+  monster.position.z = monster.spawnPosition.z + randomOffset.z;
+  
+  // Resetar estados de colisão
+  monster.lastCollisionTime = null;
+  monster.escapeAttempted = null;
   
   // Atualizar posição do collidable
   collisionManager.updateCollidablePosition(monster.id, monster.position);
   
-  // Verificar colisões
-  const collisions = collisionManager.checkEntityCollisions(
-    monster.id,
-    [COLLIDABLE_TYPES.MONSTER, COLLIDABLE_TYPES.STATIC]
-  );
-  
-  if (collisions.length > 0) {
-    // Reverter posição
-    monster.position = tempPosition;
-    collisionManager.updateCollidablePosition(monster.id, monster.position);
-    
-    // Tenta uma sequência de posições alternativas em diferentes ângulos
-    const possibleAngles = [45, -45, 90, -90, 135, -135];
-    let foundValidPosition = false;
-    
-    for (const angleOffset of possibleAngles) {
-      const radians = angleOffset * (Math.PI / 180);
-      const cosAngle = Math.cos(radians);
-      const sinAngle = Math.sin(radians);
-      
-      // Rotacionar a direção
-      const altDirection = {
-        x: finalDirection.x * cosAngle - finalDirection.z * sinAngle,
-        z: finalDirection.x * sinAngle + finalDirection.z * cosAngle
-      };
-      
-      // Tentar esta nova direção
-      const altPosition = {
-        x: tempPosition.x + altDirection.x * monster.stats.moveSpeed,
-        y: tempPosition.y,
-        z: tempPosition.z + altDirection.z * monster.stats.moveSpeed
-      };
-      
-      // Testar esta posição
-      monster.position = altPosition;
-      collisionManager.updateCollidablePosition(monster.id, monster.position);
-      
-      const altCollisions = collisionManager.checkEntityCollisions(
-        monster.id,
-        [COLLIDABLE_TYPES.MONSTER, COLLIDABLE_TYPES.STATIC]
-      );
-      
-      if (altCollisions.length === 0) {
-        // Encontrou posição válida!
-        foundValidPosition = true;
-        break;
-      }
-    }
-    
-    // Se não encontrou posição válida, volta para a posição original
-    if (!foundValidPosition) {
-      monster.position = tempPosition;
-      collisionManager.updateCollidablePosition(monster.id, monster.position);
-    }
-  }
-  
-  // Atualiza rotação para olhar para o alvo
-  monster.rotation.y = Math.atan2(finalDirection.x, finalDirection.z);
+  console.log(`Monstro ${monster.id} teletransportado para evitar travamento`);
 }
 
 // Função para calcular vetor de separação (manter distância de outros monstros)
 function calculateSeparationVector(monster) {
   const separationVector = { x: 0, z: 0 };
   let neighborCount = 0;
-  let isColliding = false;
-  const SEPARATION_RADIUS = 3.0; // Distância para considerar "muito próximo"
-  const COLLISION_RADIUS = 1.5; // Distância para considerar "em colisão"
+  const SEPARATION_RADIUS = 3.0;
+  const COLLISION_RADIUS = 1.5;
   
-  // Verificar todos os outros monstros
   for (const id in monsters) {
     if (id === monster.id || monsters[id].currentState === 'dead') continue;
     
@@ -729,33 +704,26 @@ function calculateSeparationVector(monster) {
     const dx = otherMonster.position.x - monster.position.x;
     const dz = otherMonster.position.z - monster.position.z;
     const distSq = dx * dx + dz * dz;
+    
+    // Ignorar monstros que estão longe
+    if (distSq >= SEPARATION_RADIUS * SEPARATION_RADIUS) continue;
+    
+    // Calcular distância
     const dist = Math.sqrt(distSq);
     
-    // Se estiver muito próximo, adicionar ao vetor de separação
-    if (distSq < SEPARATION_RADIUS * SEPARATION_RADIUS) {
-      // Quanto mais próximo, maior a força de separação (inversamente proporcional à distância)
-      
-      // CORREÇÃO: Força de separação muito mais forte e com aleatoriedade quando em colisão direta
-      let factor;
-      if (distSq < COLLISION_RADIUS * COLLISION_RADIUS) {
-        // Em colisão - força mais forte e com componente aleatório
-        factor = 2.0; // Aumentado de 1.5 para 2.0
-        // Adicionar uma pequena aleatoriedade para quebrar padrões de colisão
-        factor += Math.random() * 0.5;
-        isColliding = true;
-        
-        // Armazenar o timestamp da colisão para desbloqueio
-        monster.lastCollisionTime = Date.now();
-      } else {
-        // Próximo mas não colidindo - força normal baseada na distância
-        factor = Math.max(0.2, (SEPARATION_RADIUS - dist) / SEPARATION_RADIUS);
-      }
-      
-      // Adicionar direção oposta (afastar-se)
-      separationVector.x -= (dx / dist) * factor;
-      separationVector.z -= (dz / dist) * factor;
-      neighborCount++;
+    // Força de separação - inversamente proporcional à distância
+    let factor = Math.max(0.2, (SEPARATION_RADIUS - dist) / SEPARATION_RADIUS);
+    
+    // Força extra se estiver muito próximo (colisão)
+    if (distSq < COLLISION_RADIUS * COLLISION_RADIUS) {
+      factor = 2.0;
+      monster.lastCollisionTime = Date.now();
     }
+    
+    // Adicionar componente de separação
+    separationVector.x -= (dx / dist) * factor;
+    separationVector.z -= (dz / dist) * factor;
+    neighborCount++;
   }
   
   // Normalizar o vetor se houver vizinhos
@@ -764,50 +732,7 @@ function calculateSeparationVector(monster) {
     if (length > 0) {
       separationVector.x /= length;
       separationVector.z /= length;
-      
-      // Amplificar o vetor se estiver em colisão
-      if (isColliding) {
-        separationVector.x *= 2.0; // Aumentado de 1.5 para 2.0
-        separationVector.z *= 2.0;
-      }
     }
-  }
-  
-  // CORREÇÃO: Aplicar comportamento de "escape da colisão" mais rapidamente
-  if (monster.lastCollisionTime && Date.now() - monster.lastCollisionTime > 1000) { // Reduzido de 2000 para 1000
-    // Se ficar em colisão por mais de 1 segundo, fazer um movimento aleatório forte
-    const randomAngle = Math.random() * Math.PI * 2;
-    separationVector.x = Math.cos(randomAngle) * 3.0; // Aumentado de 2.0 para 3.0
-    separationVector.z = Math.sin(randomAngle) * 3.0;
-    
-    // Reset do timer após o movimento de escape
-    monster.lastCollisionTime = null;
-    
-    // ADIÇÃO: Marcar o monstro como tendo executado um movimento de escape
-    monster.escapeAttempted = Date.now();
-  }
-  
-  // ADIÇÃO: Sistema de recuperação para monstros completamente travados
-  // Se o monstro já tentou escapar mas continua preso por muito tempo
-  if (monster.escapeAttempted && Date.now() - monster.escapeAttempted > 3000) {
-    // Como último recurso, teletransportar o monstro para um ponto próximo à sua origem
-    const randomOffset = {
-      x: (Math.random() - 0.5) * 5,
-      z: (Math.random() - 0.5) * 5
-    };
-    
-    monster.position.x = monster.spawnPosition.x + randomOffset.x;
-    monster.position.z = monster.spawnPosition.z + randomOffset.z;
-    
-    // Resetar estados de colisão
-    monster.lastCollisionTime = null;
-    monster.escapeAttempted = null;
-    
-    // Log para debug
-    console.log(`Monstro ${monster.id} teletransportado para evitar travamento`);
-    
-    // Usar um vetor de direção neutro
-    return { x: 0, z: 0 };
   }
   
   return separationVector;
@@ -1129,25 +1054,22 @@ function respawnMonster(monster) {
 
 // Adicionar essa verificação ao manipulador de ataques de jogador
 function checkPlayerAttackHitMonsters(playerId, position, range, damage) {
-  let hitAny = false;
+  // Usar o método centralizado checkAreaAttack
+  const hits = collisionManager.checkAreaAttack(
+    playerId,
+    position,
+    range,
+    [COLLIDABLE_TYPES.MONSTER]
+  );
   
-  for (const id in monsters) {
-    const monster = monsters[id];
-    
-    // Ignora monstros mortos
-    if (monster.currentState === 'dead') continue;
-    
-    // Calcula distância
-    const dx = monster.position.x - position.x;
-    const dz = monster.position.z - position.z;
-    const distSq = dx * dx + dz * dz;
-    
-    // Verifica se está no alcance de ataque
-    if (distSq <= range * range) {
-      playerAttackMonster(playerId, id, damage);
+  // Processar cada monstro atingido
+  let hitAny = false;
+  hits.forEach(hit => {
+    if (hit.entity && hit.entity.id) {
+      playerAttackMonster(playerId, hit.entity.id, damage);
       hitAny = true;
     }
-  }
+  });
   
   return hitAny;
 }
